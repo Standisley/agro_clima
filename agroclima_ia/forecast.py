@@ -264,6 +264,7 @@ def predict_tomorrow(
 
 
 # --- OTIMIZAÇÃO 2: FUNÇÃO CACHEADA PARA DADOS FUTUROS ---
+# Isola a chamada da API para que o cache funcione (evita baixar a cada clique)
 @st.cache_data(ttl=3600, show_spinner=False)
 def _fetch_future_data_raw(lat, lon, start_iso, end_iso):
     """Baixa previsão futura da Open-Meteo com Cache."""
@@ -350,7 +351,8 @@ def forecast_next_days_with_openmeteo(
         df_daily2["ds"] = pd.to_datetime(df_daily2["ds"])
 
     df_future = df_om[["ds", "om_temp2m_max", "om_windspeed10_max", "om_rh2m_max"]].copy()
-    df_future["y"] = 0.0  # evita dropna(subset=['y']) matar o horizonte futuro
+    # MANTIDO: evita dropna(subset=['y']) matar o horizonte futuro
+    df_future["y"] = 0.0
 
     df_concat = pd.concat([df_daily2, df_future], ignore_index=True)
     df_concat = df_concat.sort_values("ds").reset_index(drop=True)
@@ -367,8 +369,7 @@ def forecast_next_days_with_openmeteo(
         future_mask = df_features["ds"] >= df_om["ds"].min()
         df_future_feats = df_features.loc[future_mask].copy()
 
-        # IMPORTANTE:
-        # Modelo treinado tem conjunto fixo de colunas; respeitar feature_name().
+        # Tenta pegar nomes de features do modelo
         try:
             model_feature_cols = list(getattr(model, "feature_name")())
         except Exception:
