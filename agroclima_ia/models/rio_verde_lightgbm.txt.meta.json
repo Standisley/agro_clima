@@ -1,0 +1,27 @@
+{
+  "trained_reason": "data_changed",
+  "csv_path": "C:\\Users\\stand\\OneDrive\\Documentos\\Repos\\projetos\\clima\\agroclima_ia\\data\\rio_verde_daily_rain.csv",
+  "csv_size": 172889,
+  "csv_mtime": 1764798802.6847801,
+  "csv_sha256": "653702d57cdee078baca353950a8030b4e999ab8836d33ed82c6cc2a254e923e",
+  "model_path": "C:\\Users\\stand\\OneDrive\\Documentos\\Repos\\projetos\\clima\\agroclima_ia\\models\\rio_verde_lightgbm.txt",
+  "feature_cols": [
+    "lag_1",
+    "lag_2",
+    "lag_3",
+    "lag_7",
+    "rolling_mean_7",
+    "rolling_sum_7",
+    "tmean_lag_1",
+    "tmean_roll_7",
+    "rh_lag_1",
+    "rh_roll_7",
+    "wind_lag_1",
+    "wind_roll_7",
+    "rad_lag_1",
+    "rad_roll_7",
+    "month",
+    "day_of_year",
+    "day_of_week"
+  ]
+}

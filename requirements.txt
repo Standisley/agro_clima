@@ -1,0 +1,8 @@
+pandas
+requests
+lightgbm
+scikit-learn
+streamlit
+openai
+langchain
+python-dotenv

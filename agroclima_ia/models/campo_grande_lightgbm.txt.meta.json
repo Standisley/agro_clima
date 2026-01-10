@@ -1,0 +1,27 @@
+{
+  "trained_reason": "data_changed",
+  "csv_path": "C:\\Users\\stand\\OneDrive\\Documentos\\Repos\\projetos\\clima\\agroclima_ia\\data\\campo_grande_daily_rain.csv",
+  "csv_size": 174417,
+  "csv_mtime": 1765542724.5262854,
+  "csv_sha256": "5ffcd561ba20e4d2ec44172bac19e1f5350de32875fe54b62a38dc8c7785acfa",
+  "model_path": "C:\\Users\\stand\\OneDrive\\Documentos\\Repos\\projetos\\clima\\agroclima_ia\\models\\campo_grande_lightgbm.txt",
+  "feature_cols": [
+    "lag_1",
+    "lag_2",
+    "lag_3",
+    "lag_7",
+    "rolling_mean_7",
+    "rolling_sum_7",
+    "tmean_lag_1",
+    "tmean_roll_7",
+    "rh_lag_1",
+    "rh_roll_7",
+    "wind_lag_1",
+    "wind_roll_7",
+    "rad_lag_1",
+    "rad_roll_7",
+    "month",
+    "day_of_year",
+    "day_of_week"
+  ]
+}
