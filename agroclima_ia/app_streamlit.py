@@ -149,7 +149,7 @@ def main():
     st.title("🌦️ AgroClima IA – Painel Agronômico")
 
     # ---------------------------------------------------------------------
-    # SIDEBAR RESTAURADA (DETALHADA)
+    # SIDEBAR DETALHADA
     # ---------------------------------------------------------------------
     farm_ids = sorted(cfg.FARM_CONFIG.keys())
     default_id = getattr(cfg, "ACTIVE_FARM_ID", DEFAULT_SERIES_ID)
@@ -176,9 +176,9 @@ def main():
 
     farm_cfg = get_farm_profile(selected_farm_id)
     
-    # --- VOLTANDO OS DETALHES COMPLETOS NA LATERAL ---
     st.sidebar.markdown("---")
     st.sidebar.subheader("📍 Detalhes da fazenda")
+    
     st.sidebar.write(
         f"**ID da Série:** `{farm_cfg.get('series_id', selected_farm_id)}`"
     )
@@ -194,11 +194,13 @@ def main():
         f"{farm_cfg.get('lon', DEFAULT_LON)}"
     )
 
-    # --- VOLTANDO O TEXTO EXPLICATIVO NO TOPO ---
     st.markdown(
         """
         Esta interface usa **o mesmo núcleo de modelo e regras** do script de linha de comando,
         mas permite trocar de fazenda/perfil diretamente pela barra lateral.
+
+        > 💡 Dica: O app tenta reaproveitar o histórico local quando disponível,
+        > para evitar limite de requisições da API climática em testes frequentes.
         """
     )
 
@@ -207,14 +209,18 @@ def main():
             with st.spinner("Processando dados e IA (AgroClima)..."):
                 relatorio, tabela, series_id = run_pipeline(selected_farm_id)
             
-            # Layout vertical: Relatório em cima, Tabela embaixo
-            st.subheader("📋 Relatório Técnico")
-            st.markdown(relatorio.replace("\n", "  \n"))
+            # --------------------------------------------------------
+            # LAYOUT DE COLUNAS (LADO A LADO) - IGUAL AO ORIGINAL
+            # --------------------------------------------------------
+            c1, c2 = st.columns([1, 1])  # Divide a tela em 2 metades iguais
             
-            st.write("---")
+            with c1:
+                st.subheader("📋 Relatório Técnico")
+                st.markdown(relatorio.replace("\n", "  \n"))
             
-            st.subheader("📑 Tabela Técnica Semanal")
-            st.dataframe(tabela, use_container_width=True)
+            with c2:
+                st.subheader("📑 Tabela Técnica Semanal")
+                st.dataframe(tabela, use_container_width=True)
                 
         except Exception as e:
             st.error(f"Erro: {e}")
