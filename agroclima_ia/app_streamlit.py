@@ -41,12 +41,25 @@ from agroclima_ia.main import _format_mgmt_table
 
 
 # =============================================================================
+# OTIMIZAÇÃO: Cache do Modelo de IA (CORREÇÃO DA LENTIDÃO)
+# =============================================================================
+
+# @st.cache_resource é usado para guardar objetos "pesados" (como modelos de IA) na memória RAM.
+# O modelo só será treinado novamente se os dados de entrada (df_daily) mudarem.
+@st.cache_resource(show_spinner="Treinando inteligência artificial (cache)...")
+def get_trained_model_cached(df_daily: pd.DataFrame):
+    """
+    Treina o modelo LightGBM e o mantém em memória para não treinar a cada clique.
+    """
+    return train_lightgbm_model(df_daily)
+
+
+# =============================================================================
 # FUNÇÃO AUXILIAR: trocar fazenda ativa em runtime
 # =============================================================================
 def set_active_farm_in_config(farm_id: str) -> None:
     """
     Atualiza o módulo agroclima_ia.config em runtime para usar a fazenda escolhida.
-    Isso faz o forecast/main usarem os arquivos (CSV/modelo) corretos para cada perfil.
     """
     if farm_id not in cfg.FARM_CONFIG:
         farm_id = "default"
@@ -73,13 +86,7 @@ def set_active_farm_in_config(farm_id: str) -> None:
 # =============================================================================
 def run_pipeline(farm_id: str) -> Tuple[str, pd.DataFrame, str]:
     """
-    Roda o mesmo fluxo lógico do main.py, mas para o farm_id escolhido.
-
-    Diferença importante:
-      - Aqui NÃO forçamos refresh sempre. Tentamos usar CSV local para
-        evitar estourar limite da API em testes interativos.
-      - Sempre treinamos o modelo no contexto da fazenda (como já
-        estava originalmente no app), salvando o artefato.
+    Roda o fluxo lógico otimizado com Cache.
     """
     # 1) Ajustar config para a fazenda selecionada
     set_active_farm_in_config(farm_id)
@@ -89,11 +96,11 @@ def run_pipeline(farm_id: str) -> Tuple[str, pd.DataFrame, str]:
     lon = farm_cfg.get("lon", DEFAULT_LON)
     series_id = farm_cfg.get("series_id", DEFAULT_SERIES_ID)
 
-    # 2) Histórico diário (chuva + clima)
+    # 2) Histórico diário (Agora usa o CACHE implementado no forecast.py)
     df_daily = load_or_download_daily_series(
         lat=lat,
         lon=lon,
-        force_refresh=False,  # 👉 tenta reaproveitar CSV local
+        force_refresh=False,
     )
 
     if df_daily is None or df_daily.empty:
@@ -102,16 +109,14 @@ def run_pipeline(farm_id: str) -> Tuple[str, pd.DataFrame, str]:
             "Possível erro de limite da API (429 Too Many Requests)."
         )
 
-    # 3) Treino sempre "limpo" no contexto da fazenda
-    with st.spinner(
-        f"Treinando modelo LightGBM para '{series_id}' (arquitetura atual)..."
-    ):
-        model, feature_cols = train_lightgbm_model(df_daily)
+    # 3) Treino OTIMIZADO (Usa o cache_resource definido acima)
+    # Substituímos a chamada direta train_lightgbm_model pela versão com cache
+    model, feature_cols = get_trained_model_cached(df_daily)
 
     # Previsão do modelo local para amanhã (chuva prevista = mm_tomorrow)
     mm_tomorrow = predict_tomorrow(df_daily, model, feature_cols=feature_cols)
 
-    # 4) Previsão híbrida 7 dias (modelo + Open-Meteo + ET0 FAO real)
+    # 4) Previsão híbrida 7 dias (Agora usa cache interno para APIs externas)
     forecast_df = forecast_next_days_with_openmeteo(
         df_daily=df_daily,
         model=model,
@@ -217,15 +222,12 @@ def main():
         """
         Esta interface usa **o mesmo núcleo de modelo e regras** do script de linha de comando,
         mas permite trocar de fazenda/perfil diretamente pela barra lateral.
-
-        > 💡 Dica: O app tenta reaproveitar o histórico local quando disponível,
-        > para evitar limite de requisições da API climática em testes frequentes.
         """
     )
 
-    if st.button("🚀 Rodar previsão Agronômica (7 dias) para a fazenda selecionada"):
+    if st.button("🚀 Rodar previsão Agronômica (7 dias) para a fazenda selecionada", type="primary"):
         try:
-            with st.spinner("Rodando pipeline AgroClima IA..."):
+            with st.spinner("Processando dados e IA (AgroClima)..."):
                 relatorio, tabela, series_id = run_pipeline(selected_farm_id)
         except RuntimeError as e:
             st.error(f"Erro ao gerar previsão: {e}")
@@ -234,12 +236,15 @@ def main():
             st.error(f"Erro inesperado ao gerar previsão: {e}")
             st.stop()
 
-        # Layout principal: Relatório + Tabela (sem gráfico por enquanto)
-        st.subheader("📋 Relatório Técnico")
-        st.markdown(relatorio.replace("\n", "  \n"))
-
-        st.subheader("📑 Tabela Técnica Semanal")
-        st.dataframe(tabela, use_container_width=True)
+        # Layout principal: Relatório + Tabela
+        c1, c2 = st.columns([1, 1])
+        with c1:
+            st.subheader("📋 Relatório Técnico")
+            st.markdown(relatorio.replace("\n", "  \n"))
+        
+        with c2:
+            st.subheader("📑 Tabela Técnica Semanal")
+            st.dataframe(tabela, use_container_width=True)
     else:
         st.info(
             "Selecione o perfil na barra lateral e clique no botão para rodar a previsão."

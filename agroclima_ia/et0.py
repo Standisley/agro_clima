@@ -1,4 +1,4 @@
-# et0.py
+# agroclima_ia/et0.py
 
 from __future__ import annotations
 
@@ -7,6 +7,7 @@ from typing import Any
 
 import pandas as pd
 import requests
+import streamlit as st  # <--- IMPORT NOVO OBRIGATÓRIO
 
 
 def _to_date(x: Any) -> dt.date:
@@ -23,6 +24,8 @@ def _to_date(x: Any) -> dt.date:
         raise ValueError(f"[et0] Não foi possível converter '{x}' para data.") from exc
 
 
+# --- OTIMIZAÇÃO: Cache de 1 hora (3600s) para evitar chamadas repetidas à API ---
+@st.cache_data(ttl=3600, show_spinner=False)
 def fetch_et0_fao_daily(
     lat: float,
     lon: float,
@@ -31,13 +34,8 @@ def fetch_et0_fao_daily(
     timezone: str = "auto",
 ) -> pd.DataFrame:
     """
-    Busca ET0 FAO diária (Penman-Monteith FAO-56) na Open-Meteo,
-    retornando um DataFrame com colunas:
-
-        ds (datetime64[ns])
-        om_et0_fao_mm (float)
-
-    A função é usada pelo forecast.forecast_next_days_with_openmeteo.
+    Busca ET0 FAO diária (Penman-Monteith FAO-56) na Open-Meteo.
+    Cacheado pelo Streamlit para evitar lentidão.
     """
 
     # Normaliza datas para YYYY-MM-DD (sem 'T00:00:00')
@@ -58,7 +56,7 @@ def fetch_et0_fao_daily(
 
     try:
         resp = requests.get(url, params=params, timeout=30)
-        print(f"[et0] URL chamada: {resp.url}")
+        # print(f"[et0] URL chamada: {resp.url}")
         if resp.status_code != 200:
             print(
                 f"[et0] AVISO: resposta HTTP {resp.status_code} da Open-Meteo "
@@ -101,7 +99,7 @@ def fetch_et0_fao_daily(
         )
 
     daily = data["daily"]
-    print(f"[et0] daily.keys(): {list(daily.keys())}")
+    # print(f"[et0] daily.keys(): {list(daily.keys())}")
 
     times = pd.to_datetime(daily["time"])
 
@@ -113,10 +111,7 @@ def fetch_et0_fao_daily(
         et0_vals = [0.0] * len(times)
     else:
         et0_vals = daily["et0_fao_evapotranspiration"]
-        print(
-            f"[et0] Exemplos de ET0 retornado (primeiros 5): "
-            f"{et0_vals[:5]}"
-        )
+        # print(f"[et0] Exemplos de ET0 retornado: {et0_vals[:5]}")
 
     df = pd.DataFrame(
         {
