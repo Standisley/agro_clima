@@ -10,10 +10,11 @@ import streamlit as st
 import pandas as pd
 
 # -------------------------------------------------------------------------
-# Ajuste de caminho
+# Ajuste de caminho para rodar:
+#   streamlit run agroclima_ia/app_streamlit.py
 # -------------------------------------------------------------------------
 THIS_DIR = Path(__file__).resolve().parent
-PROJECT_ROOT = THIS_DIR.parent
+PROJECT_ROOT = THIS_DIR.parent  # .../projetos/clima
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
@@ -210,17 +211,15 @@ def main():
                 relatorio, tabela, series_id = run_pipeline(selected_farm_id)
             
             # --------------------------------------------------------
-            # LAYOUT DE COLUNAS (LADO A LADO) - IGUAL AO ORIGINAL
+            # LAYOUT VERTICAL (RELATÓRIO EM CIMA, TABELA EMBAIXO)
             # --------------------------------------------------------
-            c1, c2 = st.columns([1, 1])  # Divide a tela em 2 metades iguais
+            st.subheader("📋 Relatório Técnico")
+            st.markdown(relatorio.replace("\n", "  \n"))
             
-            with c1:
-                st.subheader("📋 Relatório Técnico")
-                st.markdown(relatorio.replace("\n", "  \n"))
+            st.markdown("---") # Linha separadora para organização visual
             
-            with c2:
-                st.subheader("📑 Tabela Técnica Semanal")
-                st.dataframe(tabela, use_container_width=True)
+            st.subheader("📑 Tabela Técnica Semanal")
+            st.dataframe(tabela, use_container_width=True)
                 
         except Exception as e:
             st.error(f"Erro: {e}")
