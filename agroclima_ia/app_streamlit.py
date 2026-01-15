@@ -52,19 +52,20 @@ except ImportError:
 
 
 # =============================================================================
-# OTIMIZAÇÃO: Cache Inteligente (Automático)
+# OTIMIZAÇÃO: Cache Inteligente (Automático - 30 DIAS)
 # =============================================================================
 @st.cache_resource(show_spinner="Verificando inteligência artificial...")
 def get_trained_model_cached(df_daily: pd.DataFrame, series_id: str):
     """
     Gerencia o modelo automaticamente:
-    - Se existe arquivo e tem menos de 24h: Carrega do disco (RÁPIDO).
-    - Se é velho ou não existe: Treina e salva (LENTO).
+    - Se existe arquivo e tem menos de 30 DIAS: Carrega do disco (RÁPIDO).
+    - Se é velho ou não existe: Treina e salva (LENTO), avisando o usuário.
     """
     model_checkpoint = cfg.MODELS_DIR / f"{series_id}_checkpoint.pkl"
     
-    # Tempo limite de validade do modelo em segundos (24 horas = 86400 segundos)
-    MODEL_TTL_SECONDS = 86400
+    # Tempo limite de validade do modelo em segundos
+    # 30 dias * 24 horas * 60 minutos * 60 segundos = 2.592.000 segundos
+    MODEL_TTL_SECONDS = 30 * 24 * 60 * 60 
     
     should_retrain = True
 
@@ -75,9 +76,9 @@ def get_trained_model_cached(df_daily: pd.DataFrame, series_id: str):
         
         if age_seconds < MODEL_TTL_SECONDS:
             should_retrain = False
-            # print(f"Modelo válido encontrado ({age_seconds/3600:.1f}h). Carregando do disco...")
+            # print(f"Modelo válido encontrado ({age_seconds/86400:.1f} dias). Carregando do disco...")
         else:
-            print(f"Modelo expirado ({age_seconds/3600:.1f}h). Retreinando...")
+            print(f"Modelo expirado ({age_seconds/86400:.1f} dias). Retreinando...")
 
     # 2. Carrega se estiver válido
     if not should_retrain:
@@ -90,15 +91,22 @@ def get_trained_model_cached(df_daily: pd.DataFrame, series_id: str):
             should_retrain = True
 
     # 3. Treina e Salva (se necessário)
-    # st.toast(f"Atualizando IA para {series_id}...", icon="🧠") # Opcional: avisa o usuário visualmente
+    # AVISA O USUÁRIO QUE VAI DEMORAR
+    aviso = st.empty() # Cria um espaço vazio para mensagem temporária
+    aviso.warning(f"🧠 Treinando Inteligência Artificial para {series_id}... Isso pode levar alguns minutos (acontece a cada 30 dias).")
+    
     model, feature_cols = train_lightgbm_model(df_daily)
 
     try:
         cfg.MODELS_DIR.mkdir(parents=True, exist_ok=True)
         with open(model_checkpoint, "wb") as f:
             pickle.dump((model, feature_cols), f)
+            print(f"Modelo salvo em: {model_checkpoint}")
     except Exception as e:
         print(f"Aviso: Não foi possível salvar o modelo em disco: {e}")
+
+    # Limpa a mensagem de aviso depois de terminar
+    aviso.empty() 
 
     return model, feature_cols
 
@@ -183,12 +191,12 @@ def run_pipeline(farm_id: str, api_key: str = "") -> Tuple[str, pd.DataFrame, st
 # =============================================================================
 def main():
     st.set_page_config(
-        page_title="AgroClima IA",
+        page_title="newClima IA",
         page_icon="🌦️",
         layout="wide",
     )
 
-    st.title("🌦️ AgroClima IA – Painel Agronômico")
+    st.title("🌦️ newClima IA – Painel Agronômico")
 
     # --- SIDEBAR ---
     farm_ids = sorted(cfg.FARM_CONFIG.keys())
@@ -236,8 +244,6 @@ def main():
     st.sidebar.write(f"**Solo:** {farm_cfg.get('solo', 'N/D')}")
     st.sidebar.write(f"**GPS:** {farm_cfg.get('lat', DEFAULT_LAT)}, {farm_cfg.get('lon', DEFAULT_LON)}")
     
-    # (Checkbox de Performance REMOVIDO)
-
     if st.button("🚀 Rodar previsão Agronômica (7 dias)", type="primary"):
         try:
             with st.spinner("Conectando satélites, IA e processando..."):
