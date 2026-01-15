@@ -176,6 +176,11 @@ def run_pipeline(farm_id: str, api_key: str = "") -> Tuple[str, pd.DataFrame, st
         sistema=farm_cfg.get("sistema", ""),
         anomalies=anomalies,
     )
+    
+    # --- BLINDAGEM CONTRA ERRO 'NoneType' (CORREÇÃO AQUI) ---
+    if relatorio is None:
+        relatorio = "⚠️ Erro Crítico: O gerador de relatório não retornou texto (None). Verifique se o módulo explain.py está atualizado."
+    # --------------------------------------------------------
 
     tabela = _format_mgmt_table(forecast_mgmt)
     return relatorio, tabela, series_id
@@ -248,6 +253,7 @@ def main():
                 )
             
             st.subheader("📋 Relatório Técnico")
+            # Agora 'relatorio' nunca será None, então .replace() funcionará
             st.markdown(relatorio.replace("\n", "  \n"))
             st.markdown("---") 
             st.subheader("📑 Tabela Técnica Semanal")

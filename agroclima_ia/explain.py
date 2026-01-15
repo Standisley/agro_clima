@@ -8,7 +8,7 @@ import pandas as pd
 try:
     from agroclima_ia.zarc import check_zarc_risk
 except ImportError:
-    # Se der erro no import, cria uma função "tapa-buraco" para não quebrar o app
+    # Se der erro no import, cria uma função "tapa-buraco" para não quebrar
     def check_zarc_risk(r, c, s): return "N/D (Módulo não encontrado)"
 
 # Tenta importar a biblioteca do Google
@@ -41,7 +41,7 @@ def _format_monitoramento_block(anomalies: Optional[Dict[str, Any]]) -> str:
     return "\n".join(linhas)
 
 # =============================================================================
-# Função Conexão LLM (ROBUSTA / AUTO-DISCOVERY)
+# Função Conexão LLM (Auto-Discovery Robusto)
 # =============================================================================
 def call_gemini_llm(prompt_text: str, api_key: str) -> str:
     if not HAS_GOOGLE_LIB: return "⚠️ Erro: Biblioteca 'google-generativeai' não instalada."
@@ -51,13 +51,14 @@ def call_gemini_llm(prompt_text: str, api_key: str) -> str:
         genai.configure(api_key=api_key)
         config = genai.types.GenerationConfig(temperature=0.4)
         
-        # 1. Tenta o modelo padrão mais rápido primeiro
+        # 1. Tenta o modelo padrão mais rápido primeiro (Flash)
         try:
             model = genai.GenerativeModel('gemini-1.5-flash')
             response = model.generate_content(prompt_text, generation_config=config)
-            return response.text
+            if response and response.text:
+                return response.text
         except Exception:
-            pass # Falhou? Vamos para a busca automática
+            pass # Se falhar, segue para a busca automática
 
         # 2. Busca Automática (Lista quais modelos sua conta TEM acesso)
         valid_models = []
@@ -72,7 +73,7 @@ def call_gemini_llm(prompt_text: str, api_key: str) -> str:
         if not valid_models:
             return "⚠️ Erro: Nenhum modelo Gemini disponível na sua conta."
 
-        # Ordena para tentar os 'flash' primeiro (mais rápidos)
+        # Ordena para tentar os 'flash' primeiro
         valid_models.sort(key=lambda x: 'flash' not in x)
 
         last_error = None
@@ -80,18 +81,19 @@ def call_gemini_llm(prompt_text: str, api_key: str) -> str:
             try:
                 model = genai.GenerativeModel(model_name)
                 response = model.generate_content(prompt_text, generation_config=config)
-                return response.text
+                if response and response.text:
+                    return response.text
             except Exception as e:
                 last_error = e
                 continue
         
-        return f"⚠️ Falha na IA. Tentamos {valid_models} e todos falharam. Erro final: {last_error}"
+        return f"⚠️ Falha na IA. Tentamos os modelos {valid_models} e todos falharam. Erro final: {last_error}"
 
     except Exception as e:
         return f"⚠️ Erro Geral LLM: {e}"
 
 # =============================================================================
-# Função Principal (COM O VISUAL DO ZARC)
+# Função Principal de Explicação
 # =============================================================================
 
 def explain_forecast_with_llm(
@@ -109,7 +111,7 @@ def explain_forecast_with_llm(
     # --- 1. CONSULTA O ZARC ---
     risco_zarc = check_zarc_risk(regiao, cultura, solo)
     
-    # Formatação visual bonita para o relatório
+    # Formatação visual
     if "20%" in risco_zarc: 
         zarc_txt = f"✅ DENTRO DA JANELA (Risco: {risco_zarc})"
         zarc_status_llm = f"Favorável ({risco_zarc})"
@@ -142,5 +144,89 @@ def explain_forecast_with_llm(
     if anomalies_dict and anomalies_dict.get("messages"):
         monitoramento_plain = "\n".join(f"- {m}" for m in anomalies_dict["messages"])
     
-    # Bloco formatado para o modo offline
-    monitoramento_block = _format_monitoramento_block
+    monitoramento_block = _format_monitoramento_block(anomalies_dict)
+
+    # 3. Janelas Operacionais
+    pest_risk_txt = "BAIXO"
+    if "pest_risk" in df.columns:
+        vc = df["pest_risk"].value_counts()
+        if vc.get("RISCO_ALTO_FERRUGEM", 0) > 0: pest_risk_txt = "ALTO"
+        elif vc.get("RISCO_ATENÇÃO", 0) > 0: pest_risk_txt = "ATENÇÃO"
+
+    pulverizacao_txt = "Sem janelas seguras."
+    if "spray_status" in df.columns:
+        verde = (df["spray_status"] == "VERDE").sum()
+        if verde > 0: pulverizacao_txt = f"{verde} dias VERDE."
+        else: pulverizacao_txt = "Restrito (Amarelo/Vermelho)."
+
+    plantio_txt = "Inadequado."
+    if "planting_status" in df.columns:
+        ok = (df["planting_status"] == "PLANTIO_OK").sum()
+        if ok > 0: plantio_txt = f"{ok} dias FAVORÁVEIS."
+
+    adubacao_txt = "Verificar umidade."
+    if "nitrogen_status" in df.columns:
+        ok_n = (df["nitrogen_status"] == "N_OK").sum()
+        if ok_n > 0: adubacao_txt = f"{ok_n} dias FAVORÁVEIS."
+
+    # -------------------------------------------------------------------------
+    # PROMPT PARA LLM
+    # -------------------------------------------------------------------------
+    if llm_fn is not None:
+        prompt = f"""
+        Você é o AgroClima IA. Gere um relatório técnico direto.
+
+        DADOS:
+        - Fazenda: {cultura.upper()} | {regiao}
+        - Solo: {solo}
+        - ZARC (Risco Oficial): {zarc_status_llm}
+        - Clima (7d): Chuva {chuva_total:.1f}mm | Saldo {saldo_total:.1f}mm
+        - Alertas: {monitoramento_plain}
+        
+        JANELAS:
+        - Plantio: {plantio_txt}
+        - Adubação: {adubacao_txt}
+
+        IMPORTANTE:
+        Se o ZARC estiver "FORA DA JANELA" ou "40%", ALERTE o produtor sobre perda de seguro.
+        Se estiver "20%", confirme que está seguro plantar.
+
+        FORMATO DE SAÍDA (Markdown):
+
+        ### 📋 RELATÓRIO TÉCNICO: {cultura.upper()}
+        📍 **{regiao}** | Solo: {solo}
+
+        **1. STATUS ZARC (Risco Oficial):**
+        👉 **{zarc_txt}**
+
+        **2. CLIMA (7 dias):**
+        • Chuva: {chuva_total:.1f} mm | Saldo: {saldo_total:.1f} mm
+
+        **3. ANÁLISE E RECOMENDAÇÃO (IA):**
+        (Sua análise aqui)
+        """
+        # Chama a IA e garante retorno de string
+        resposta = llm_fn(prompt)
+        if resposta:
+            return resposta
+        return "⚠️ Erro: A IA conectou, mas não gerou resposta (Retorno vazio)."
+
+    # -------------------------------------------------------------------------
+    # TEMPLATE OFFLINE
+    # -------------------------------------------------------------------------
+    return f"""### 📋 RELATÓRIO: {cultura.upper()}
+📍 **{regiao}**
+
+**1. STATUS ZARC:**
+👉 **{zarc_txt}**
+
+**CLIMA:** Chuva: {chuva_total:.1f}mm | Saldo: {saldo_total:.1f}mm
+{monitoramento_block}
+
+**MANEJO:**
+🚜 Pulverização: {pulverizacao_txt}
+🌱 Plantio: {plantio_txt}
+🌿 Adubação: {adubacao_txt}
+
+*(Modo Offline)*
+"""
