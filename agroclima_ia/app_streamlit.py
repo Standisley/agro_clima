@@ -179,6 +179,23 @@ def main():
         format_func=_label,
     )
 
+    # -----------------------------------------------------------------
+    # DETALHES DA FAZENDA (RESTAURADO)
+    # -----------------------------------------------------------------
+    farm_cfg = get_farm_profile(selected_farm_id)
+    
+    st.sidebar.subheader("📍 Detalhes da fazenda")
+    st.sidebar.write(f"**ID da Série:** `{farm_cfg.get('series_id', selected_farm_id)}`")
+    st.sidebar.write(f"**Região:** {farm_cfg.get('regiao', 'N/D')}")
+    st.sidebar.write(f"**Cultura:** {farm_cfg.get('cultura', 'N/D')}")
+    st.sidebar.write(f"**Estágio:** {farm_cfg.get('estagio_fenologico', 'N/D')}")
+    st.sidebar.write(f"**Sistema:** {farm_cfg.get('sistema', 'N/D')}")
+    st.sidebar.write(f"**Solo:** {farm_cfg.get('solo', 'N/D')}")
+    st.sidebar.write(
+        f"**GPS:** {farm_cfg.get('lat', DEFAULT_LAT)}, {farm_cfg.get('lon', DEFAULT_LON)}"
+    )
+    # -----------------------------------------------------------------
+
     if st.button("🚀 Rodar previsão Agronômica (7 dias)", type="primary"):
         try:
             with st.spinner("Conectando satélites, IA e processando..."):
