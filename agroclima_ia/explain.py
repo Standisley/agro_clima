@@ -40,7 +40,7 @@ def _format_monitoramento_block(anomalies: Optional[Dict[str, Any]]) -> str:
     return texto.strip()
 
 # =============================================================================
-# Função Conexão LLM (Auto-Discovery Robusto)
+# Função Conexão LLM (ATUALIZADA PARA GEMINI 1.5)
 # =============================================================================
 def call_gemini_llm(prompt_text: str, api_key: str) -> str:
     if not HAS_GOOGLE_LIB: return "⚠️ Erro: Biblioteca 'google-generativeai' não instalada."
@@ -50,34 +50,54 @@ def call_gemini_llm(prompt_text: str, api_key: str) -> str:
         genai.configure(api_key=api_key)
         config = genai.types.GenerationConfig(temperature=0.4)
         
-        # Lista de tentativas (Do mais rápido para o mais robusto)
-        models_to_try = ['gemini-1.5-flash', 'gemini-1.5-pro', 'gemini-pro']
+        # LISTA DE MODELOS MODERNOS (Ordem de prioridade)
+        # O erro 404 aconteceu porque 'gemini-pro' antigo pode estar indisponível.
+        # Priorizamos o 1.5-flash que é mais rápido e estável.
+        models_to_try = [
+            'gemini-1.5-flash', 
+            'gemini-1.5-pro', 
+            'gemini-1.0-pro', 
+            'gemini-pro'
+        ]
         
-        # Tenta descobrir o que a conta suporta
+        # Tenta descobrir o que a conta suporta (Auto-Discovery)
         try:
-            available = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
-            if available:
-                # Prioriza flash se disponível, senão usa o que tiver
-                forced_list = [m for m in models_to_try if m in available]
-                if forced_list:
-                    models_to_try = forced_list + [m for m in available if m not in forced_list]
-        except: pass
+            available_models = []
+            for m in genai.list_models():
+                if 'generateContent' in m.supported_generation_methods:
+                    available_models.append(m.name)
+            
+            # Se a busca funcionou, filtra nossa lista
+            if available_models:
+                # Mantém a ordem de preferência, mas só usa os que existem
+                models_to_try = [m for m in models_to_try if m in available_models]
+                # Se nenhum da nossa lista preferida existir, usa qualquer um disponível
+                if not models_to_try:
+                    models_to_try = available_models
+        except: 
+            pass # Se der erro ao listar, usa a lista hardcoded mesmo
 
         last_error = None
+        
+        # Loop de tentativa
         for model_name in models_to_try:
             try:
+                # Remove o prefixo 'models/' se vier da lista automática para evitar duplicação
+                if "models/" in model_name:
+                    model_name = model_name.replace("models/", "")
+                    
                 model = genai.GenerativeModel(model_name)
                 response = model.generate_content(prompt_text, generation_config=config)
                 if response and response.text:
                     return response.text
             except Exception as e:
                 last_error = e
-                continue
+                continue # Tenta o próximo da lista
         
-        return f"⚠️ Falha na IA. Erro final: {last_error}"
+        return f"⚠️ Falha na IA. Nenhum modelo funcionou. Erro final: {last_error}"
 
     except Exception as e:
-        return f"⚠️ Erro Geral LLM: {e}"
+        return f"⚠️ Erro Geral Conexão LLM: {e}"
 
 # =============================================================================
 # Função Principal de Explicação
@@ -146,7 +166,7 @@ def explain_forecast_with_llm(
         if ok_n > 0: adubacao_txt = f"{ok_n} dias FAVORÁVEIS ✅"
 
     # =========================================================================
-    # MONTAGEM DO CABEÇALHO FIXO (Isso garante que os dados apareçam!)
+    # MONTAGEM DO CABEÇALHO FIXO (Garante visualização dos dados)
     # =========================================================================
     saldo_icon = '🔵 Superávit' if saldo_total >= 0 else '🟠 Déficit'
     
