@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
-from typing import Tuple
+from typing import Tuple, Optional
 
 import streamlit as st
 import pandas as pd
@@ -14,10 +14,13 @@ import pandas as pd
 #   streamlit run agroclima_ia/app_streamlit.py
 # -------------------------------------------------------------------------
 THIS_DIR = Path(__file__).resolve().parent
-PROJECT_ROOT = THIS_DIR.parent  # .../projetos/clima
+PROJECT_ROOT = THIS_DIR.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
+# -------------------------------------------------------------------------
+# Importações do Projeto
+# -------------------------------------------------------------------------
 import agroclima_ia.config as cfg
 from agroclima_ia.config import (
     DEFAULT_LAT,
@@ -35,13 +38,22 @@ from agroclima_ia.forecast import (
 
 from agroclima_ia.management import apply_management_windows
 from agroclima_ia.anomalies import detect_agro_anomalies
-from agroclima_ia.explain import explain_forecast_with_llm
 from agroclima_ia.risk import calculate_pest_risk
 from agroclima_ia.main import _format_mgmt_table
 
+# --- IMPORTAÇÃO SEGURA DA IA (Evita Tela Branca) ---
+try:
+    from agroclima_ia.explain import explain_forecast_with_llm, call_gemini_llm
+except ImportError:
+    # Se der erro no explain.py, define versões dummy para o app abrir
+    print("AVISO: Falha ao importar explain.py ou google-generativeai.")
+    def explain_forecast_with_llm(df, llm_fn=None, **kwargs):
+        return "⚠️ Erro no módulo de explicação (explain.py). Verifique as instalações."
+    def call_gemini_llm(p, k): return None
+
 
 # =============================================================================
-# OTIMIZAÇÃO: Cache do Modelo de IA
+# OTIMIZAÇÃO: Cache do Modelo de IA (Machine Learning)
 # =============================================================================
 @st.cache_resource(show_spinner="Treinando inteligência artificial (cache)...")
 def get_trained_model_cached(df_daily: pd.DataFrame):
@@ -72,9 +84,9 @@ def set_active_farm_in_config(farm_id: str) -> None:
 
 
 # =============================================================================
-# PIPELINE OTIMIZADO
+# PIPELINE PRINCIPAL
 # =============================================================================
-def run_pipeline(farm_id: str) -> Tuple[str, pd.DataFrame, str]:
+def run_pipeline(farm_id: str, api_key: str = "") -> Tuple[str, pd.DataFrame, str]:
     # 1) Config
     set_active_farm_in_config(farm_id)
     farm_cfg = get_farm_profile(farm_id)
@@ -121,9 +133,20 @@ def run_pipeline(farm_id: str) -> Tuple[str, pd.DataFrame, str]:
     )
     anomalies = detect_agro_anomalies(forecast_mgmt, meta=farm_cfg)
 
+    # ---------------------------------------------------------
+    # INTEGRAÇÃO DO LLM (Google Gemini)
+    # ---------------------------------------------------------
+    # Definimos a função wrapper. Se não tiver KEY, passa None (modo offline)
+    llm_function = None
+    
+    if api_key and api_key.strip():
+        def _my_llm_wrapper(prompt_txt: str) -> str:
+            return call_gemini_llm(prompt_txt, api_key)
+        llm_function = _my_llm_wrapper
+
     relatorio = explain_forecast_with_llm(
         forecast_mgmt,
-        llm_fn=None,
+        llm_fn=llm_function,
         cultura=farm_cfg.get("cultura", ""),
         estagio_fenologico=farm_cfg.get("estagio_fenologico", ""),
         solo=farm_cfg.get("solo", ""),
@@ -138,16 +161,16 @@ def run_pipeline(farm_id: str) -> Tuple[str, pd.DataFrame, str]:
 
 
 # =============================================================================
-# APP STREAMLIT
+# APP STREAMLIT (INTERFACE)
 # =============================================================================
 def main():
     st.set_page_config(
-        page_title="AgroClima IA",
+        page_title="newClima IA",
         page_icon="🌦️",
         layout="wide",
     )
 
-    st.title("🌦️ AgroClima IA – Painel Agronômico")
+    st.title("🌦️ newClima IA – Painel Agronômico")
 
     # ---------------------------------------------------------------------
     # SIDEBAR DETALHADA
@@ -167,7 +190,17 @@ def main():
             f"{('(' + estagio + ')') if estagio else ''}"
         )
 
-    st.sidebar.header("🌾 Selecione a fazenda/perfil")
+    st.sidebar.header("🌾 Configuração")
+    
+    # --- CAMPO PARA API KEY ---
+    st.sidebar.markdown("**🤖 Inteligência Artificial (LLM)**")
+    gemini_key = st.sidebar.text_input(
+        "Google Gemini API Key:", 
+        type="password", 
+        help="Cole aqui sua chave do Google AI Studio. Se deixar vazio, usa o modo Offline."
+    )
+    st.sidebar.markdown("---")
+
     selected_farm_id = st.sidebar.selectbox(
         "Perfil/Fazenda:",
         options=farm_ids,
@@ -177,7 +210,6 @@ def main():
 
     farm_cfg = get_farm_profile(selected_farm_id)
     
-    st.sidebar.markdown("---")
     st.sidebar.subheader("📍 Detalhes da fazenda")
     
     st.sidebar.write(
@@ -199,32 +231,32 @@ def main():
         """
         Esta interface usa **o mesmo núcleo de modelo e regras** do script de linha de comando,
         mas permite trocar de fazenda/perfil diretamente pela barra lateral.
-
-        > 💡 Dica: O app tenta reaproveitar o histórico local quando disponível,
-        > para evitar limite de requisições da API climática em testes frequentes.
         """
     )
 
-    if st.button("🚀 Rodar previsão Agronômica (7 dias) para a fazenda selecionada", type="primary"):
+    if st.button("🚀 Rodar previsão Agronômica (7 dias)", type="primary"):
         try:
             with st.spinner("Processando dados e IA (AgroClima)..."):
-                relatorio, tabela, series_id = run_pipeline(selected_farm_id)
+                # Passamos a API KEY para o pipeline
+                relatorio, tabela, series_id = run_pipeline(selected_farm_id, api_key=gemini_key)
             
             # --------------------------------------------------------
-            # LAYOUT VERTICAL (RELATÓRIO EM CIMA, TABELA EMBAIXO)
+            # LAYOUT VERTICAL (Relatório no topo, Tabela embaixo)
             # --------------------------------------------------------
             st.subheader("📋 Relatório Técnico")
             st.markdown(relatorio.replace("\n", "  \n"))
             
-            st.markdown("---") # Linha separadora para organização visual
+            st.markdown("---") 
             
             st.subheader("📑 Tabela Técnica Semanal")
             st.dataframe(tabela, use_container_width=True)
                 
         except Exception as e:
-            st.error(f"Erro: {e}")
+            st.error(f"Erro ao processar: {e}")
+            # Dica para debug: descomente abaixo para ver o erro completo no terminal
+            # raise e
     else:
-        st.info("Selecione o perfil na barra lateral e clique no botão para rodar a previsão.")
+        st.info("Selecione o perfil e clique no botão para rodar a previsão.")
 
 
 if __name__ == "__main__":

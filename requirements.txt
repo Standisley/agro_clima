@@ -1,8 +1,9 @@
+streamlit
 pandas
+numpy
 requests
 lightgbm
-scikit-learn
-streamlit
-openai
-langchain
-python-dotenv
+matplotlib
+openpyxl
+google-generativeai==0.8.3
+protobuf==4.25.3
