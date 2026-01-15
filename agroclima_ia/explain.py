@@ -8,7 +8,6 @@ import pandas as pd
 try:
     from agroclima_ia.zarc import check_zarc_risk
 except ImportError:
-    # Se der erro no import, cria uma função "tapa-buraco" para não quebrar o app
     def check_zarc_risk(r, c, s): return "N/D (Módulo não encontrado)"
 
 # Tenta importar a biblioteca do Google
@@ -26,19 +25,19 @@ def _fmt_mm(v: float) -> str:
 
 def _format_monitoramento_block(anomalies: Optional[Dict[str, Any]]) -> str:
     if anomalies is None or not isinstance(anomalies, dict):
-        return "2. ✅ MONITORAMENTO:\n• Sem riscos críticos de anomalia climática."
+        return "• Anomalias: Sem riscos críticos identificados."
 
     has_critical = bool(anomalies.get("has_critical", False))
     messages: List[str] = anomalies.get("messages") or []
-    summary: str = anomalies.get("summary") or ""
-
+    
     if not messages and not has_critical:
-        return "2. ✅ MONITORAMENTO:\n• Sem riscos críticos de anomalia climática."
+        return "• Anomalias: Sem riscos críticos de anomalia climática."
 
-    header = "2. ⚠ MONITORAMENTO (Riscos Climáticos Detectados):" if has_critical else "2. 🔎 MONITORAMENTO (Anomalias observadas):"
-    linhas = [header, "⚠ O algoritmo identificou anomalias climáticas relevantes:"]
-    for msg in messages: linhas.append(f"• {msg}")
-    return "\n".join(linhas)
+    # Se houver alertas, formata como lista
+    texto = "• ⚠ **ALERTAS CLIMÁTICOS:**\n"
+    for msg in messages:
+        texto += f"  - {msg}\n"
+    return texto.strip()
 
 # =============================================================================
 # Função Conexão LLM (Auto-Discovery Robusto)
@@ -51,33 +50,21 @@ def call_gemini_llm(prompt_text: str, api_key: str) -> str:
         genai.configure(api_key=api_key)
         config = genai.types.GenerationConfig(temperature=0.4)
         
-        # 1. Tenta o modelo padrão mais rápido primeiro (Flash)
+        # Lista de tentativas (Do mais rápido para o mais robusto)
+        models_to_try = ['gemini-1.5-flash', 'gemini-1.5-pro', 'gemini-pro']
+        
+        # Tenta descobrir o que a conta suporta
         try:
-            model = genai.GenerativeModel('gemini-1.5-flash')
-            response = model.generate_content(prompt_text, generation_config=config)
-            if response and response.text:
-                return response.text
-        except Exception:
-            pass # Se falhar, segue para a busca automática
-
-        # 2. Busca Automática (Lista quais modelos sua conta TEM acesso)
-        valid_models = []
-        try:
-            for m in genai.list_models():
-                if 'generateContent' in m.supported_generation_methods:
-                    if 'gemini' in m.name:
-                        valid_models.append(m.name)
-        except Exception as e_list:
-            return f"⚠️ Erro ao listar modelos: {e_list}"
-
-        if not valid_models:
-            return "⚠️ Erro: Nenhum modelo Gemini disponível na sua conta."
-
-        # Ordena para tentar os 'flash' primeiro
-        valid_models.sort(key=lambda x: 'flash' not in x)
+            available = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
+            if available:
+                # Prioriza flash se disponível, senão usa o que tiver
+                forced_list = [m for m in models_to_try if m in available]
+                if forced_list:
+                    models_to_try = forced_list + [m for m in available if m not in forced_list]
+        except: pass
 
         last_error = None
-        for model_name in valid_models:
+        for model_name in models_to_try:
             try:
                 model = genai.GenerativeModel(model_name)
                 response = model.generate_content(prompt_text, generation_config=config)
@@ -87,7 +74,7 @@ def call_gemini_llm(prompt_text: str, api_key: str) -> str:
                 last_error = e
                 continue
         
-        return f"⚠️ Falha na IA. Tentamos os modelos {valid_models} e todos falharam. Erro final: {last_error}"
+        return f"⚠️ Falha na IA. Erro final: {last_error}"
 
     except Exception as e:
         return f"⚠️ Erro Geral LLM: {e}"
@@ -110,20 +97,14 @@ def explain_forecast_with_llm(
     
     # --- 1. CONSULTA O ZARC ---
     risco_zarc = check_zarc_risk(regiao, cultura, solo)
-    
-    # Formatação visual
     if "20%" in risco_zarc: 
         zarc_txt = f"✅ DENTRO DA JANELA (Risco: {risco_zarc})"
-        zarc_status_llm = f"Favorável ({risco_zarc})"
     elif "30%" in risco_zarc or "40%" in risco_zarc: 
         zarc_txt = f"⚠️ RISCO MÉDIO/ALTO ({risco_zarc})"
-        zarc_status_llm = f"Atenção ({risco_zarc})"
     elif "FORA" in risco_zarc: 
         zarc_txt = f"⛔ {risco_zarc} (Sem cobertura de seguro)"
-        zarc_status_llm = "PROIBITIVO (Fora da janela)"
     else: 
         zarc_txt = f"ℹ️ {risco_zarc}"
-        zarc_status_llm = risco_zarc
 
     # 2. Dados Climáticos
     chuva_col = "y_ensemble_mm" if "y_ensemble_mm" in df.columns else "y"
@@ -133,131 +114,116 @@ def explain_forecast_with_llm(
     chuva_total = float(df[chuva_col].sum()) if chuva_col in df.columns else 0.0
     et0_total = float(df[et0_col].sum()) if et0_col in df.columns else 0.0
     saldo_total = float(df[saldo_col].sum()) if saldo_col in df.columns else 0.0
-    n_dias_secos = int((df[chuva_col] < 0.5).sum()) if chuva_col in df.columns else 0
     
-    # Normalização de anomalias
+    # 3. Monitoramento e Anomalias (Garantido pelo Python)
     anomalies_dict = anomalies if isinstance(anomalies, dict) else None
     if anomalies and not isinstance(anomalies, dict): 
          anomalies_dict = {"has_critical": True, "messages": list(anomalies)}
-
-    monitoramento_plain = "Sem riscos críticos."
-    if anomalies_dict and anomalies_dict.get("messages"):
-        monitoramento_plain = "\n".join(f"- {m}" for m in anomalies_dict["messages"])
     
-    monitoramento_block = _format_monitoramento_block(anomalies_dict)
+    monitoramento_txt = _format_monitoramento_block(anomalies_dict)
 
-    # 3. Janelas Operacionais
+    # 4. Janelas Operacionais (Garantido pelo Python)
     pest_risk_txt = "BAIXO"
     if "pest_risk" in df.columns:
         vc = df["pest_risk"].value_counts()
-        if vc.get("RISCO_ALTO_FERRUGEM", 0) > 0: pest_risk_txt = "ALTO"
-        elif vc.get("RISCO_ATENÇÃO", 0) > 0: pest_risk_txt = "ATENÇÃO"
+        if vc.get("RISCO_ALTO_FERRUGEM", 0) > 0: pest_risk_txt = "ALTO 🚩"
+        elif vc.get("RISCO_ATENÇÃO", 0) > 0: pest_risk_txt = "ATENÇÃO ⚠️"
 
-    pulverizacao_txt = "Sem janelas seguras."
+    pulverizacao_txt = "Sem janelas."
     if "spray_status" in df.columns:
         verde = (df["spray_status"] == "VERDE").sum()
-        if verde > 0: pulverizacao_txt = f"{verde} dias VERDE."
-        else: pulverizacao_txt = "Restrito (Amarelo/Vermelho)."
+        if verde > 0: pulverizacao_txt = f"{verde} dias VERDE ✅"
+        else: pulverizacao_txt = "Restrito (Amarelo/Vermelho) ⛔"
 
     plantio_txt = "Inadequado."
     if "planting_status" in df.columns:
         ok = (df["planting_status"] == "PLANTIO_OK").sum()
-        if ok > 0: plantio_txt = f"{ok} dias FAVORÁVEIS."
+        if ok > 0: plantio_txt = f"{ok} dias FAVORÁVEIS ✅"
 
     adubacao_txt = "Verificar umidade."
     if "nitrogen_status" in df.columns:
         ok_n = (df["nitrogen_status"] == "N_OK").sum()
-        if ok_n > 0: adubacao_txt = f"{ok_n} dias FAVORÁVEIS."
+        if ok_n > 0: adubacao_txt = f"{ok_n} dias FAVORÁVEIS ✅"
 
     # =========================================================================
-    # LÓGICA DE CONTEXTO AGRONÔMICO (CORREÇÃO V4)
+    # MONTAGEM DO CABEÇALHO FIXO (Isso garante que os dados apareçam!)
     # =========================================================================
-    contexto_estagio = ""
-    estagio_lower = str(estagio_fenologico).lower()
+    saldo_icon = '🔵 Superávit' if saldo_total >= 0 else '🟠 Déficit'
     
-    if "v" in estagio_lower or "vegetativo" in estagio_lower or "perfilhamento" in estagio_lower or "crescimento" in estagio_lower:
-        contexto_estagio = (
-            "⚠️ A CULTURA JÁ ESTÁ PLANTADA E EM CRESCIMENTO VEGETATIVO. "
-            "NÃO RECOMENDE PLANTIO. "
-            "FOQUE EM: Adubação de cobertura (Nitrogênio), controle de plantas daninhas e monitoramento de pragas (lagartas)."
-        )
-    elif "r" in estagio_lower or "reprodutivo" in estagio_lower or "flor" in estagio_lower or "enchimento" in estagio_lower or "frutificacao" in estagio_lower:
-        contexto_estagio = (
-            "⚠️ A CULTURA JÁ ESTÁ EM FASE REPRODUTIVA/ENCHIMENTO. "
-            "NÃO RECOMENDE PLANTIO. "
-            "FOQUE EM: Sanidade (Fungicidas), estresse hídrico e abortamento de flores/frutos."
-        )
-    elif "colheita" in estagio_lower or "maturacao" in estagio_lower:
-        contexto_estagio = "⚠️ A CULTURA ESTÁ PRONTA PARA COLHEITA. Foque em umidade do grão e logística de máquinas."
-    else:
-        contexto_estagio = "Verifique se é fase de pré-plantio ou manejo. Se houver dias favoráveis de plantio, mencione apenas se o estágio for 'Pré-plantio' ou vazio."
+    header_report = f"""### 📋 RELATÓRIO TÉCNICO: {cultura.upper()}
+📍 **{regiao}** | Solo: {solo}
 
-    # -------------------------------------------------------------------------
-    # PROMPT PARA LLM
-    # -------------------------------------------------------------------------
-    if llm_fn is not None:
-        prompt = f"""
-        Você é o AgroClima IA. Gere um relatório técnico direto e estruturado.
-
-        CONTEXTO AGRONÔMICO CRÍTICO:
-        {contexto_estagio}
-
-        DADOS:
-        - Fazenda: {cultura.upper()} | {regiao}
-        - Estágio Informado: {estagio_fenologico} (Respeite rigorosamente!)
-        - Solo: {solo}
-        - ZARC (Risco Oficial): {zarc_status_llm}
-        - Clima (7d): Chuva {chuva_total:.1f}mm | ET0 {et0_total:.1f}mm | Saldo {saldo_total:.1f}mm
-        - Monitoramento/Alertas: {monitoramento_plain}
-        - Janelas: Pulverização ({pulverizacao_txt}), Plantio ({plantio_txt}), Adubação ({adubacao_txt})
-
-        FORMATO DE SAÍDA OBRIGATÓRIO (Markdown):
-
-        ### 📋 RELATÓRIO TÉCNICO: {cultura.upper()}
-        📍 **{regiao}** | Solo: {solo}
-
-        **1. STATUS ZARC (Risco Oficial):**
-        👉 **{zarc_txt}**
-
-        **2. CLIMA (Acumulado 7 dias):**
-        • Chuva: **{chuva_total:.1f} mm**
-        • ET0 (Demanda): {et0_total:.1f} mm
-        • Saldo Hídrico: **{saldo_total:.1f} mm** ({'🔵 Superávit' if saldo_total >= 0 else '🟠 Déficit'})
-
-        **3. MONITORAMENTO & RISCOS:**
-        • Anomalias: {monitoramento_plain}
-        • Risco Fitossanitário: {pest_risk_txt}
-
-        **4. JANELAS OPERACIONAIS:**
-        • 🚜 Pulverização: {pulverizacao_txt}
-        • 🌱 Plantio (Condição Solo): {plantio_txt}
-        • 🌿 Adubação (N): {adubacao_txt}
-
-        **5. ANÁLISE E RECOMENDAÇÃO AGRONÔMICA (IA):**
-        (Sua análise aqui, focada no estágio {estagio_fenologico}. Se estiver em V4, fale de adubação e pragas, não mande plantar.)
-        """
-        # Chama a IA e garante retorno de string
-        resposta = llm_fn(prompt)
-        if resposta:
-            return resposta
-        return "⚠️ Erro: A IA conectou, mas não gerou resposta (Retorno vazio)."
-
-    # -------------------------------------------------------------------------
-    # TEMPLATE OFFLINE
-    # -------------------------------------------------------------------------
-    return f"""### 📋 RELATÓRIO: {cultura.upper()}
-📍 **{regiao}**
-
-**1. STATUS ZARC:**
+**1. STATUS ZARC (Risco Oficial):**
 👉 **{zarc_txt}**
 
-**CLIMA:** Chuva: {chuva_total:.1f}mm | Saldo: {saldo_total:.1f}mm
-{monitoramento_block}
+**2. CLIMA (Acumulado 7 dias):**
+• Chuva Prevista: **{chuva_total:.1f} mm**
+• ET0 (Demanda): {et0_total:.1f} mm
+• Saldo Hídrico: **{saldo_total:.1f} mm** ({saldo_icon})
 
-**MANEJO:**
-🚜 Pulverização: {pulverizacao_txt}
-🌱 Plantio: {plantio_txt}
-🌿 Adubação: {adubacao_txt}
+**3. MONITORAMENTO & RISCOS:**
+{monitoramento_txt}
+• Risco Fitossanitário: {pest_risk_txt}
 
-*(Modo Offline)*
+**4. JANELAS OPERACIONAIS:**
+• 🚜 Pulverização: {pulverizacao_txt}
+• 🌱 Plantio (Condição Solo): {plantio_txt}
+• 🌿 Adubação (N): {adubacao_txt}
 """
+
+    # Se não tiver LLM configurado, retorna só os dados
+    if llm_fn is None:
+        return header_report + "\n*(Modo Offline - Sem análise de IA)*"
+
+    # =========================================================================
+    # LÓGICA DE CONTEXTO E PROMPT (Para a parte 5 - Análise)
+    # =========================================================================
+    estagio_lower = str(estagio_fenologico).lower()
+    contexto = "Geral"
+    
+    # Define o que a IA deve priorizar baseado no estágio
+    if any(x in estagio_lower for x in ["v", "vegetativo", "perfilhamento", "crescimento"]):
+        contexto = (
+            "A CULTURA JÁ ESTÁ PLANTADA E EM CRESCIMENTO VEGETATIVO. "
+            "NÃO RECOMENDE PLANTIO (mesmo se a janela estiver aberta). "
+            "FOQUE EM: Adubação de cobertura (Nitrogênio) e Pragas (Lagartas)."
+        )
+    elif any(x in estagio_lower for x in ["r", "reprodutivo", "flor", "enchimento", "frutificacao"]):
+        contexto = (
+            "A CULTURA ESTÁ EM REPRODUÇÃO. "
+            "NÃO RECOMENDE PLANTIO. "
+            "FOQUE EM: Aplicação de Fungicidas e Estresse Hídrico."
+        )
+    elif any(x in estagio_lower for x in ["colheita", "maturacao"]):
+        contexto = "A CULTURA ESTÁ EM MATURAÇÃO/COLHEITA. Foque em logística e umidade do grão."
+
+    prompt = f"""
+    Atue como o Agrônomo Sênior do AgroClima IA.
+    
+    DADOS DO RELATÓRIO JÁ APRESENTADOS AO PRODUTOR:
+    {header_report}
+    
+    ESTÁGIO ATUAL DA CULTURA: {estagio_fenologico}
+    CONTEXTO OBRIGATÓRIO: {contexto}
+    
+    SUA TAREFA:
+    Escreva APENAS o item "5. ANÁLISE E RECOMENDAÇÃO AGRONÔMICA (IA)".
+    Não repita os números de chuva/clima (eles já estão na tela), apenas analise-os.
+    
+    REGRAS DE OURO:
+    1. Se o saldo hídrico for negativo, alerte sobre risco na adubação.
+    2. Se estiver em V4/Vegetativo, NÃO mande plantar.
+    3. Seja direto e prático.
+
+    SAÍDA ESPERADA:
+    **5. ANÁLISE E RECOMENDAÇÃO AGRONÔMICA (IA):**
+    (Seu texto aqui)
+    """
+
+    resposta_ia = llm_fn(prompt)
+    
+    if not resposta_ia:
+        resposta_ia = "⚠️ A IA analisou os dados mas não retornou texto. Verifique sua conexão."
+
+    # Junta o Cabeçalho Fixo (Dados) com a Análise (IA)
+    return header_report + "\n" + resposta_ia
