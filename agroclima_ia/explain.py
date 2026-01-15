@@ -8,7 +8,7 @@ import pandas as pd
 try:
     from agroclima_ia.zarc import check_zarc_risk
 except ImportError:
-    # Se der erro no import, cria uma função "tapa-buraco" para não quebrar
+    # Se der erro no import, cria uma função "tapa-buraco" para não quebrar o app
     def check_zarc_risk(r, c, s): return "N/D (Módulo não encontrado)"
 
 # Tenta importar a biblioteca do Google
@@ -169,6 +169,29 @@ def explain_forecast_with_llm(
         ok_n = (df["nitrogen_status"] == "N_OK").sum()
         if ok_n > 0: adubacao_txt = f"{ok_n} dias FAVORÁVEIS."
 
+    # =========================================================================
+    # LÓGICA DE CONTEXTO AGRONÔMICO (CORREÇÃO V4)
+    # =========================================================================
+    contexto_estagio = ""
+    estagio_lower = str(estagio_fenologico).lower()
+    
+    if "v" in estagio_lower or "vegetativo" in estagio_lower or "perfilhamento" in estagio_lower or "crescimento" in estagio_lower:
+        contexto_estagio = (
+            "⚠️ A CULTURA JÁ ESTÁ PLANTADA E EM CRESCIMENTO VEGETATIVO. "
+            "NÃO RECOMENDE PLANTIO. "
+            "FOQUE EM: Adubação de cobertura (Nitrogênio), controle de plantas daninhas e monitoramento de pragas (lagartas)."
+        )
+    elif "r" in estagio_lower or "reprodutivo" in estagio_lower or "flor" in estagio_lower or "enchimento" in estagio_lower or "frutificacao" in estagio_lower:
+        contexto_estagio = (
+            "⚠️ A CULTURA JÁ ESTÁ EM FASE REPRODUTIVA/ENCHIMENTO. "
+            "NÃO RECOMENDE PLANTIO. "
+            "FOQUE EM: Sanidade (Fungicidas), estresse hídrico e abortamento de flores/frutos."
+        )
+    elif "colheita" in estagio_lower or "maturacao" in estagio_lower:
+        contexto_estagio = "⚠️ A CULTURA ESTÁ PRONTA PARA COLHEITA. Foque em umidade do grão e logística de máquinas."
+    else:
+        contexto_estagio = "Verifique se é fase de pré-plantio ou manejo. Se houver dias favoráveis de plantio, mencione apenas se o estágio for 'Pré-plantio' ou vazio."
+
     # -------------------------------------------------------------------------
     # PROMPT PARA LLM
     # -------------------------------------------------------------------------
@@ -176,20 +199,24 @@ def explain_forecast_with_llm(
         prompt = f"""
         Você é o AgroClima IA. Gere um relatório técnico direto.
 
+        CONTEXTO AGRONÔMICO CRÍTICO:
+        {contexto_estagio}
+
         DADOS:
         - Fazenda: {cultura.upper()} | {regiao}
+        - Estágio Informado: {estagio_fenologico} (Respeite rigorosamente!)
         - Solo: {solo}
         - ZARC (Risco Oficial): {zarc_status_llm}
         - Clima (7d): Chuva {chuva_total:.1f}mm | Saldo {saldo_total:.1f}mm
         - Alertas: {monitoramento_plain}
         
-        JANELAS:
+        JANELAS OPERACIONAIS (Apenas informativas, analise conforme o contexto):
         - Plantio: {plantio_txt}
         - Adubação: {adubacao_txt}
 
         IMPORTANTE:
         Se o ZARC estiver "FORA DA JANELA" ou "40%", ALERTE o produtor sobre perda de seguro.
-        Se estiver "20%", confirme que está seguro plantar.
+        Se estiver "20%", confirme a segurança.
 
         FORMATO DE SAÍDA (Markdown):
 
@@ -203,7 +230,7 @@ def explain_forecast_with_llm(
         • Chuva: {chuva_total:.1f} mm | Saldo: {saldo_total:.1f} mm
 
         **3. ANÁLISE E RECOMENDAÇÃO (IA):**
-        (Sua análise aqui)
+        (Sua análise aqui, focada no estágio {estagio_fenologico})
         """
         # Chama a IA e garante retorno de string
         resposta = llm_fn(prompt)
