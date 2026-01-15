@@ -197,7 +197,7 @@ def explain_forecast_with_llm(
     # -------------------------------------------------------------------------
     if llm_fn is not None:
         prompt = f"""
-        Você é o AgroClima IA. Gere um relatório técnico direto.
+        Você é o AgroClima IA. Gere um relatório técnico direto e estruturado.
 
         CONTEXTO AGRONÔMICO CRÍTICO:
         {contexto_estagio}
@@ -207,18 +207,11 @@ def explain_forecast_with_llm(
         - Estágio Informado: {estagio_fenologico} (Respeite rigorosamente!)
         - Solo: {solo}
         - ZARC (Risco Oficial): {zarc_status_llm}
-        - Clima (7d): Chuva {chuva_total:.1f}mm | Saldo {saldo_total:.1f}mm
-        - Alertas: {monitoramento_plain}
-        
-        JANELAS OPERACIONAIS (Apenas informativas, analise conforme o contexto):
-        - Plantio: {plantio_txt}
-        - Adubação: {adubacao_txt}
+        - Clima (7d): Chuva {chuva_total:.1f}mm | ET0 {et0_total:.1f}mm | Saldo {saldo_total:.1f}mm
+        - Monitoramento/Alertas: {monitoramento_plain}
+        - Janelas: Pulverização ({pulverizacao_txt}), Plantio ({plantio_txt}), Adubação ({adubacao_txt})
 
-        IMPORTANTE:
-        Se o ZARC estiver "FORA DA JANELA" ou "40%", ALERTE o produtor sobre perda de seguro.
-        Se estiver "20%", confirme a segurança.
-
-        FORMATO DE SAÍDA (Markdown):
+        FORMATO DE SAÍDA OBRIGATÓRIO (Markdown):
 
         ### 📋 RELATÓRIO TÉCNICO: {cultura.upper()}
         📍 **{regiao}** | Solo: {solo}
@@ -226,11 +219,22 @@ def explain_forecast_with_llm(
         **1. STATUS ZARC (Risco Oficial):**
         👉 **{zarc_txt}**
 
-        **2. CLIMA (7 dias):**
-        • Chuva: {chuva_total:.1f} mm | Saldo: {saldo_total:.1f} mm
+        **2. CLIMA (Acumulado 7 dias):**
+        • Chuva: **{chuva_total:.1f} mm**
+        • ET0 (Demanda): {et0_total:.1f} mm
+        • Saldo Hídrico: **{saldo_total:.1f} mm** ({'🔵 Superávit' if saldo_total >= 0 else '🟠 Déficit'})
 
-        **3. ANÁLISE E RECOMENDAÇÃO (IA):**
-        (Sua análise aqui, focada no estágio {estagio_fenologico})
+        **3. MONITORAMENTO & RISCOS:**
+        • Anomalias: {monitoramento_plain}
+        • Risco Fitossanitário: {pest_risk_txt}
+
+        **4. JANELAS OPERACIONAIS:**
+        • 🚜 Pulverização: {pulverizacao_txt}
+        • 🌱 Plantio (Condição Solo): {plantio_txt}
+        • 🌿 Adubação (N): {adubacao_txt}
+
+        **5. ANÁLISE E RECOMENDAÇÃO AGRONÔMICA (IA):**
+        (Sua análise aqui, focada no estágio {estagio_fenologico}. Se estiver em V4, fale de adubação e pragas, não mande plantar.)
         """
         # Chama a IA e garante retorno de string
         resposta = llm_fn(prompt)
