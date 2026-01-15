@@ -1,0 +1,38 @@
+regiao,cultura,solo,decendio,risco
+Rio Verde (GO),soja,argiloso,1,30%
+Rio Verde (GO),soja,argiloso,2,40%
+Rio Verde (GO),soja,argiloso,3,40%
+Rio Verde (GO),soja,argiloso,4,FORA DA JANELA
+Campo Grande (MS),milho,argilo-arenoso,1,20%
+Campo Grande (MS),milho,argilo-arenoso,2,20%
+Campo Grande (MS),milho,argilo-arenoso,3,20%
+Campo Grande (MS),milho,argilo-arenoso,4,20%
+Campo Grande (MS),milho,argilo-arenoso,5,20%
+Campo Grande (MS),milho,argilo-arenoso,6,20%
+Goiânia (GO),soja,argilo-arenoso,1,30%
+Goiânia (GO),soja,argilo-arenoso,2,40%
+Goiânia (GO),soja,argilo-arenoso,3,FORA DA JANELA
+Goiânia (GO),soja,argilo-arenoso,4,FORA DA JANELA
+Sul de Minas (MG),cafe,argiloso,1,20%
+Sul de Minas (MG),cafe,argiloso,2,20%
+Sul de Minas (MG),cafe,argiloso,3,20%
+Sul de Minas (MG),cafe,argiloso,4,20%
+Centro-leste de São Paulo,laranja,argilo-arenoso,1,20%
+Centro-leste de São Paulo,laranja,argilo-arenoso,2,20%
+Centro-leste de São Paulo,laranja,argilo-arenoso,3,20%
+Centro-leste de São Paulo,laranja,argilo-arenoso,4,20%
+Norte do Rio Grande do Sul,trigo,argiloso,1,FORA DA JANELA
+Norte do Rio Grande do Sul,trigo,argiloso,2,FORA DA JANELA
+Norte do Rio Grande do Sul,trigo,argiloso,3,FORA DA JANELA
+Norte do Rio Grande do Sul,trigo,argiloso,4,FORA DA JANELA
+Campanha Gaúcha (RS),arroz,gleissolo,1,40%
+Campanha Gaúcha (RS),arroz,gleissolo,2,FORA DA JANELA
+Campanha Gaúcha (RS),arroz,gleissolo,3,FORA DA JANELA
+Goiás (GO),arroz,argilo-arenoso,1,20%
+Goiás (GO),arroz,argilo-arenoso,2,20%
+Goiás (GO),arroz,argilo-arenoso,3,30%
+Vale do Ribeira (SP),banana,argilo-arenoso,1,20%
+Vale do Ribeira (SP),banana,argilo-arenoso,2,20%
+Vale do Ribeira (SP),banana,argilo-arenoso,3,20%
+Centro-Oeste (Brasil),soja,argiloso,1,30%
+Centro-Oeste (Brasil),soja,argiloso,2,40%
