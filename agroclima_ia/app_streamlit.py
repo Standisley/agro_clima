@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import sys
+import time
+import pickle
 from pathlib import Path
 from typing import Tuple, Optional
 
@@ -50,11 +52,55 @@ except ImportError:
 
 
 # =============================================================================
-# OTIMIZAÇÃO: Cache do Modelo de IA
+# OTIMIZAÇÃO: Cache Inteligente (Automático)
 # =============================================================================
-@st.cache_resource(show_spinner="Treinando inteligência artificial (cache)...")
-def get_trained_model_cached(df_daily: pd.DataFrame):
-    return train_lightgbm_model(df_daily)
+@st.cache_resource(show_spinner="Verificando inteligência artificial...")
+def get_trained_model_cached(df_daily: pd.DataFrame, series_id: str):
+    """
+    Gerencia o modelo automaticamente:
+    - Se existe arquivo e tem menos de 24h: Carrega do disco (RÁPIDO).
+    - Se é velho ou não existe: Treina e salva (LENTO).
+    """
+    model_checkpoint = cfg.MODELS_DIR / f"{series_id}_checkpoint.pkl"
+    
+    # Tempo limite de validade do modelo em segundos (24 horas = 86400 segundos)
+    MODEL_TTL_SECONDS = 86400
+    
+    should_retrain = True
+
+    # 1. Verifica se o arquivo existe e é recente
+    if model_checkpoint.exists():
+        last_modified = model_checkpoint.stat().st_mtime
+        age_seconds = time.time() - last_modified
+        
+        if age_seconds < MODEL_TTL_SECONDS:
+            should_retrain = False
+            # print(f"Modelo válido encontrado ({age_seconds/3600:.1f}h). Carregando do disco...")
+        else:
+            print(f"Modelo expirado ({age_seconds/3600:.1f}h). Retreinando...")
+
+    # 2. Carrega se estiver válido
+    if not should_retrain:
+        try:
+            with open(model_checkpoint, "rb") as f:
+                model, feature_cols = pickle.load(f)
+            return model, feature_cols
+        except Exception as e:
+            print(f"Erro ao ler modelo, forçando retreino: {e}")
+            should_retrain = True
+
+    # 3. Treina e Salva (se necessário)
+    # st.toast(f"Atualizando IA para {series_id}...", icon="🧠") # Opcional: avisa o usuário visualmente
+    model, feature_cols = train_lightgbm_model(df_daily)
+
+    try:
+        cfg.MODELS_DIR.mkdir(parents=True, exist_ok=True)
+        with open(model_checkpoint, "wb") as f:
+            pickle.dump((model, feature_cols), f)
+    except Exception as e:
+        print(f"Aviso: Não foi possível salvar o modelo em disco: {e}")
+
+    return model, feature_cols
 
 
 # =============================================================================
@@ -94,7 +140,9 @@ def run_pipeline(farm_id: str, api_key: str = "") -> Tuple[str, pd.DataFrame, st
     if df_daily is None or df_daily.empty:
         raise RuntimeError("Histórico climático vazio (erro API).")
 
-    model, feature_cols = get_trained_model_cached(df_daily)
+    # Chama a função inteligente (sem pedir permissão ao usuário)
+    model, feature_cols = get_trained_model_cached(df_daily, series_id)
+    
     mm_tomorrow = predict_tomorrow(df_daily, model, feature_cols=feature_cols)
 
     forecast_df = forecast_next_days_with_openmeteo(
@@ -135,12 +183,12 @@ def run_pipeline(farm_id: str, api_key: str = "") -> Tuple[str, pd.DataFrame, st
 # =============================================================================
 def main():
     st.set_page_config(
-        page_title="newClima IA",
+        page_title="AgroClima IA",
         page_icon="🌦️",
         layout="wide",
     )
 
-    st.title("🌦️ newClima IA – Painel Agronômico")
+    st.title("🌦️ AgroClima IA – Painel Agronômico")
 
     # --- SIDEBAR ---
     farm_ids = sorted(cfg.FARM_CONFIG.keys())
@@ -154,21 +202,16 @@ def main():
     st.sidebar.header("🌾 Configuração")
     
     # -----------------------------------------------------------------
-    # LÓGICA DE SEGREDOS (AUTOMATIZA A CHAVE)
+    # LÓGICA DE SEGREDOS
     # -----------------------------------------------------------------
     st.sidebar.markdown("**🤖 Inteligência Artificial (LLM)**")
-    
-    # Tenta pegar a chave do cofre (st.secrets)
     gemini_key = st.secrets.get("GEMINI_KEY", "")
 
     if gemini_key:
         st.sidebar.success("🔑 Chave carregada automaticamente!")
     else:
         st.sidebar.warning("⚠️ Chave não encontrada nos Secrets.")
-        gemini_key = st.sidebar.text_input(
-            "Cole a chave aqui manualmente:", 
-            type="password"
-        )
+        gemini_key = st.sidebar.text_input("Cole a chave aqui manualmente:", type="password")
 
     st.sidebar.markdown("---")
 
@@ -180,7 +223,7 @@ def main():
     )
 
     # -----------------------------------------------------------------
-    # DETALHES DA FAZENDA (RESTAURADO)
+    # DETALHES DA FAZENDA
     # -----------------------------------------------------------------
     farm_cfg = get_farm_profile(selected_farm_id)
     
@@ -191,15 +234,17 @@ def main():
     st.sidebar.write(f"**Estágio:** {farm_cfg.get('estagio_fenologico', 'N/D')}")
     st.sidebar.write(f"**Sistema:** {farm_cfg.get('sistema', 'N/D')}")
     st.sidebar.write(f"**Solo:** {farm_cfg.get('solo', 'N/D')}")
-    st.sidebar.write(
-        f"**GPS:** {farm_cfg.get('lat', DEFAULT_LAT)}, {farm_cfg.get('lon', DEFAULT_LON)}"
-    )
-    # -----------------------------------------------------------------
+    st.sidebar.write(f"**GPS:** {farm_cfg.get('lat', DEFAULT_LAT)}, {farm_cfg.get('lon', DEFAULT_LON)}")
+    
+    # (Checkbox de Performance REMOVIDO)
 
     if st.button("🚀 Rodar previsão Agronômica (7 dias)", type="primary"):
         try:
             with st.spinner("Conectando satélites, IA e processando..."):
-                relatorio, tabela, series_id = run_pipeline(selected_farm_id, api_key=gemini_key)
+                relatorio, tabela, series_id = run_pipeline(
+                    selected_farm_id, 
+                    api_key=gemini_key
+                )
             
             st.subheader("📋 Relatório Técnico")
             st.markdown(relatorio.replace("\n", "  \n"))
