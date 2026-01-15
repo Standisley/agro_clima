@@ -142,7 +142,6 @@ def main():
 
     st.title("🌦️ newClima IA – Painel Agronômico")
 
-    
     # --- SIDEBAR ---
     farm_ids = sorted(cfg.FARM_CONFIG.keys())
     default_id = getattr(cfg, "ACTIVE_FARM_ID", DEFAULT_SERIES_ID)
@@ -159,16 +158,16 @@ def main():
     # -----------------------------------------------------------------
     st.sidebar.markdown("**🤖 Inteligência Artificial (LLM)**")
     
-    # Verifica se a chave está salva nos segredos do Streamlit Cloud
-    if "GEMINI_KEY" in st.secrets:
-        gemini_key = st.secrets["GEMINI_KEY"]
+    # Tenta pegar a chave do cofre (st.secrets)
+    gemini_key = st.secrets.get("GEMINI_KEY", "")
+
+    if gemini_key:
         st.sidebar.success("🔑 Chave carregada automaticamente!")
     else:
-        # Se não tiver, pede para digitar
+        st.sidebar.warning("⚠️ Chave não encontrada nos Secrets.")
         gemini_key = st.sidebar.text_input(
-            "Google Gemini API Key:", 
-            type="password", 
-            help="Configure 'GEMINI_KEY' nos Secrets do Streamlit para não precisar digitar aqui."
+            "Cole a chave aqui manualmente:", 
+            type="password"
         )
 
     st.sidebar.markdown("---")
