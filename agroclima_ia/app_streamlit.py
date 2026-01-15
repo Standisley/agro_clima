@@ -135,22 +135,14 @@ def run_pipeline(farm_id: str, api_key: str = "") -> Tuple[str, pd.DataFrame, st
 # =============================================================================
 def main():
     st.set_page_config(
-        page_title="AgroClima IA",
+        page_title="newClima IA",
         page_icon="🌦️",
         layout="wide",
     )
 
-    st.title("🌦️ AgroClima IA – Painel Agronômico")
+    st.title("🌦️ newClima IA – Painel Agronômico")
 
-    # --- DEBUG TEMPORÁRIO (Apague depois) ---
-    st.write("🔍 **Debug de Segredos:**")
-    st.write(f"Segredos encontrados: {list(st.secrets.keys())}")
-    if "GEMINI_KEY" in st.secrets:
-        st.write(f"A chave existe e começa com: {st.secrets['GEMINI_KEY'][:5]}...")
-    else:
-        st.error("❌ A chave 'GEMINI_KEY' NÃO foi encontrada nos segredos.")
-    # ----------------------------------------
-
+    
     # --- SIDEBAR ---
     farm_ids = sorted(cfg.FARM_CONFIG.keys())
     default_id = getattr(cfg, "ACTIVE_FARM_ID", DEFAULT_SERIES_ID)
