@@ -54,17 +54,17 @@ except ImportError:
 # =============================================================================
 # OTIMIZAÇÃO: Cache Inteligente (Automático - 30 DIAS)
 # =============================================================================
-@st.cache_resource(show_spinner="Verificando inteligência artificial...")
+@st.cache_resource
 def get_trained_model_cached(df_daily: pd.DataFrame, series_id: str):
     """
     Gerencia o modelo automaticamente:
     - Se existe arquivo e tem menos de 30 DIAS: Carrega do disco (RÁPIDO).
-    - Se é velho ou não existe: Treina e salva (LENTO), avisando o usuário.
+    - Se é velho ou não existe: Treina e salva (LENTO), avisando via TOAST.
     """
     model_checkpoint = cfg.MODELS_DIR / f"{series_id}_checkpoint.pkl"
     
     # Tempo limite de validade do modelo em segundos
-    # 30 dias * 24 horas * 60 minutos * 60 segundos = 2.592.000 segundos
+    # 30 dias * 24 horas * 60 minutos * 60 segundos
     MODEL_TTL_SECONDS = 30 * 24 * 60 * 60 
     
     should_retrain = True
@@ -76,7 +76,6 @@ def get_trained_model_cached(df_daily: pd.DataFrame, series_id: str):
         
         if age_seconds < MODEL_TTL_SECONDS:
             should_retrain = False
-            # print(f"Modelo válido encontrado ({age_seconds/86400:.1f} dias). Carregando do disco...")
         else:
             print(f"Modelo expirado ({age_seconds/86400:.1f} dias). Retreinando...")
 
@@ -91,9 +90,8 @@ def get_trained_model_cached(df_daily: pd.DataFrame, series_id: str):
             should_retrain = True
 
     # 3. Treina e Salva (se necessário)
-    # AVISA O USUÁRIO QUE VAI DEMORAR
-    aviso = st.empty() # Cria um espaço vazio para mensagem temporária
-    aviso.warning(f"🧠 Treinando Inteligência Artificial para {series_id}... Isso pode levar alguns minutos (acontece a cada 30 dias).")
+    # MENSAGEM CORRIGIDA: Foco no tempo de espera do usuário
+    st.toast(f"Treinando IA para {series_id}... Aguarde, isso pode levar alguns minutos.", icon="⏳")
     
     model, feature_cols = train_lightgbm_model(df_daily)
 
@@ -104,9 +102,6 @@ def get_trained_model_cached(df_daily: pd.DataFrame, series_id: str):
             print(f"Modelo salvo em: {model_checkpoint}")
     except Exception as e:
         print(f"Aviso: Não foi possível salvar o modelo em disco: {e}")
-
-    # Limpa a mensagem de aviso depois de terminar
-    aviso.empty() 
 
     return model, feature_cols
 

@@ -1,0 +1,6 @@
+# Ignorar arquivos de cache e modelos treinados
+__pycache__/
+*.pyc
+*.pkl
+agroclima_ia/models/*.pkl
+agroclima_ia/models/*.txt
