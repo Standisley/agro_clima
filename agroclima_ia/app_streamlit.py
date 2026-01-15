@@ -59,7 +59,7 @@ def get_trained_model_cached(df_daily: pd.DataFrame, series_id: str):
     """
     Gerencia o modelo automaticamente:
     - Se existe arquivo e tem menos de 30 DIAS: Carrega do disco (RÁPIDO).
-    - Se é velho ou não existe: Treina e salva (LENTO), avisando via TOAST.
+    - Se é velho ou não existe: Treina e salva (LENTO).
     """
     model_checkpoint = cfg.MODELS_DIR / f"{series_id}_checkpoint.pkl"
     
@@ -90,8 +90,8 @@ def get_trained_model_cached(df_daily: pd.DataFrame, series_id: str):
             should_retrain = True
 
     # 3. Treina e Salva (se necessário)
-    # MENSAGEM CORRIGIDA: Foco no tempo de espera do usuário
-    st.toast(f"Treinando IA para {series_id}... Aguarde, isso pode levar alguns minutos.", icon="⏳")
+    # OBS: Removido st.toast/st.warning daqui para evitar erro de Cache do Streamlit
+    print(f"Treinando IA para {series_id}...") 
     
     model, feature_cols = train_lightgbm_model(df_daily)
 
@@ -218,46 +218,7 @@ def main():
 
     st.sidebar.markdown("---")
 
-    selected_farm_id = st.sidebar.selectbox(
-        "Perfil/Fazenda:",
-        options=farm_ids,
-        index=farm_ids.index(default_id),
-        format_func=_label,
-    )
-
-    # -----------------------------------------------------------------
-    # DETALHES DA FAZENDA
-    # -----------------------------------------------------------------
-    farm_cfg = get_farm_profile(selected_farm_id)
-    
-    st.sidebar.subheader("📍 Detalhes da fazenda")
-    st.sidebar.write(f"**ID da Série:** `{farm_cfg.get('series_id', selected_farm_id)}`")
-    st.sidebar.write(f"**Região:** {farm_cfg.get('regiao', 'N/D')}")
-    st.sidebar.write(f"**Cultura:** {farm_cfg.get('cultura', 'N/D')}")
-    st.sidebar.write(f"**Estágio:** {farm_cfg.get('estagio_fenologico', 'N/D')}")
-    st.sidebar.write(f"**Sistema:** {farm_cfg.get('sistema', 'N/D')}")
-    st.sidebar.write(f"**Solo:** {farm_cfg.get('solo', 'N/D')}")
-    st.sidebar.write(f"**GPS:** {farm_cfg.get('lat', DEFAULT_LAT)}, {farm_cfg.get('lon', DEFAULT_LON)}")
-    
-    if st.button("🚀 Rodar previsão Agronômica (7 dias)", type="primary"):
-        try:
-            with st.spinner("Conectando satélites, IA e processando..."):
-                relatorio, tabela, series_id = run_pipeline(
-                    selected_farm_id, 
-                    api_key=gemini_key
-                )
-            
-            st.subheader("📋 Relatório Técnico")
-            st.markdown(relatorio.replace("\n", "  \n"))
-            st.markdown("---") 
-            st.subheader("📑 Tabela Técnica Semanal")
-            st.dataframe(tabela, use_container_width=True)
-                
-        except Exception as e:
-            st.error(f"Erro: {e}")
-
-if __name__ == "__main__":
-    main()
+    selected_farm_id = st
 
 
 
