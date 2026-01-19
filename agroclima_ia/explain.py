@@ -33,14 +33,13 @@ def _format_monitoramento_block(anomalies: Optional[Dict[str, Any]]) -> str:
     if not messages and not has_critical:
         return "• Anomalias: Sem riscos críticos de anomalia climática."
 
-    # Se houver alertas, formata como lista
     texto = "• ⚠ **ALERTAS CLIMÁTICOS:**\n"
     for msg in messages:
         texto += f"  - {msg}\n"
     return texto.strip()
 
 # =============================================================================
-# Função Conexão LLM (ATUALIZADA PARA GEMINI 1.5)
+# Função Conexão LLM (ATUALIZADA)
 # =============================================================================
 def call_gemini_llm(prompt_text: str, api_key: str) -> str:
     if not HAS_GOOGLE_LIB: return "⚠️ Erro: Biblioteca 'google-generativeai' não instalada."
@@ -50,7 +49,6 @@ def call_gemini_llm(prompt_text: str, api_key: str) -> str:
         genai.configure(api_key=api_key)
         config = genai.types.GenerationConfig(temperature=0.4)
         
-        # LISTA DE MODELOS MODERNOS (Ordem de prioridade)
         models_to_try = [
             'gemini-1.5-flash', 
             'gemini-1.5-pro', 
@@ -58,14 +56,12 @@ def call_gemini_llm(prompt_text: str, api_key: str) -> str:
             'gemini-pro'
         ]
         
-        # Tenta descobrir o que a conta suporta (Auto-Discovery)
         try:
             available_models = []
             for m in genai.list_models():
                 if 'generateContent' in m.supported_generation_methods:
                     available_models.append(m.name)
             
-            # Se a busca funcionou, filtra nossa lista
             if available_models:
                 models_to_try = [m for m in models_to_try if m in available_models]
                 if not models_to_try:
@@ -74,13 +70,10 @@ def call_gemini_llm(prompt_text: str, api_key: str) -> str:
             pass 
 
         last_error = None
-        
-        # Loop de tentativa
         for model_name in models_to_try:
             try:
                 if "models/" in model_name:
                     model_name = model_name.replace("models/", "")
-                    
                 model = genai.GenerativeModel(model_name)
                 response = model.generate_content(prompt_text, generation_config=config)
                 if response and response.text:
@@ -155,18 +148,17 @@ def explain_forecast_with_llm(
         ok = (df["planting_status"] == "PLANTIO_OK").sum()
         if ok > 0: plantio_txt = f"{ok} dias FAVORÁVEIS ✅"
 
-    # --- AJUSTE AGRONÔMICO PARA SOJA (NOVO) ---
+    # --- AJUSTE AGRONÔMICO PARA SOJA ---
     adubacao_txt = "Verificar umidade."
     if "soja" in cultura.lower():
         adubacao_txt = "Não se aplica (Fixação Biológica) 🦠"
     else:
-        # Lógica normal para Milho, Trigo, etc.
         if "nitrogen_status" in df.columns:
             ok_n = (df["nitrogen_status"] == "N_OK").sum()
             if ok_n > 0: adubacao_txt = f"{ok_n} dias FAVORÁVEIS ✅"
 
     # =========================================================================
-    # MONTAGEM DO CABEÇALHO FIXO (Garante visualização dos dados)
+    # MONTAGEM DO CABEÇALHO FIXO
     # =========================================================================
     saldo_icon = '🔵 Superávit' if saldo_total >= 0 else '🟠 Déficit'
     
@@ -191,54 +183,53 @@ def explain_forecast_with_llm(
 • 🌿 Adubação (N): {adubacao_txt}
 """
 
-    # Se não tiver LLM configurado, retorna só os dados
     if llm_fn is None:
         return header_report + "\n*(Modo Offline - Sem análise de IA)*"
 
     # =========================================================================
-    # LÓGICA DE CONTEXTO E PROMPT (Para a parte 5 - Análise)
+    # LÓGICA DE CONTEXTO E PROMPT (REFINADA COM CAUSA DO ZARC)
     # =========================================================================
     estagio_lower = str(estagio_fenologico).lower()
-    contexto = "Geral"
     
-    # Define o que a IA deve priorizar baseado no estágio
+    # Lógica de Contexto
     if any(x in estagio_lower for x in ["v", "vegetativo", "perfilhamento", "crescimento"]):
         contexto = (
             "A CULTURA JÁ ESTÁ PLANTADA E EM CRESCIMENTO VEGETATIVO. "
-            "NÃO RECOMENDE PLANTIO (mesmo se a janela estiver aberta). "
-            "FOQUE EM: Adubação de cobertura (Nitrogênio) e Pragas (Lagartas)."
+            "NÃO RECOMENDE PLANTIO. "
+            "FOQUE EM: Adubação de cobertura (se não for soja) e Pragas (Lagartas)."
         )
     elif any(x in estagio_lower for x in ["r", "reprodutivo", "flor", "enchimento", "frutificacao"]):
         contexto = (
-            "A CULTURA ESTÁ EM REPRODUÇÃO. "
-            "NÃO RECOMENDE PLANTIO. "
-            "FOQUE EM: Aplicação de Fungicidas e Estresse Hídrico."
+            "A CULTURA ESTÁ EM REPRODUÇÃO (Fase Crítica). "
+            "IMPORTANTE SOBRE O ZARC: Como a planta já está no campo, se o ZARC indica risco alto (30/40%), "
+            "EXPLIQUE O MOTIVO PROVÁVEL (Ex: Risco de Veranico/Deficiência Hídrica nesta época ou excesso de chuva). "
+            "O ZARC aqui serve como ALERTA DE ESTRESSE CLIMÁTICO, não de plantio."
         )
     elif any(x in estagio_lower for x in ["colheita", "maturacao"]):
         contexto = "A CULTURA ESTÁ EM MATURAÇÃO/COLHEITA. Foque em logística e umidade do grão."
+    else:
+        contexto = "Geral."
 
     prompt = f"""
     Atue como o Agrônomo Sênior do AgroClima IA.
     
-    DADOS DO RELATÓRIO JÁ APRESENTADOS AO PRODUTOR:
+    DADOS DO RELATÓRIO:
     {header_report}
     
-    ESTÁGIO ATUAL DA CULTURA: {estagio_fenologico}
+    ESTÁGIO ATUAL: {estagio_fenologico}
     CONTEXTO OBRIGATÓRIO: {contexto}
     
     SUA TAREFA:
     Escreva APENAS o item "5. ANÁLISE E RECOMENDAÇÃO AGRONÔMICA (IA)".
-    Não repita os números de chuva/clima (eles já estão na tela), apenas analise-os.
     
-    REGRAS DE OURO:
-    1. Se o saldo hídrico for negativo, alerte sobre risco na adubação.
-    2. Se estiver em V4/Vegetativo, NÃO mande plantar.
-    3. Se for SOJA, não recomende Nitrogênio (FBN).
-    4. Seja direto e prático.
-
+    DIRETRIZES ESPECÍFICAS:
+    1. **Explique o ZARC:** Se o risco for 20%, diga que o ambiente está seguro. Se for 30% ou 40%, explique QUE TIPO de risco o produtor corre agora (provavelmente seca ou chuva excessiva, dependendo do saldo hídrico acima).
+    2. **Soja em R1:** O foco é sanidade (Ferrugem) e Água. O risco ZARC indica vulnerabilidade climática.
+    3. **Nitrogênio:** Se for Soja, confirme que não precisa de N.
+    
     SAÍDA ESPERADA:
     **5. ANÁLISE E RECOMENDAÇÃO AGRONÔMICA (IA):**
-    (Seu texto aqui)
+    (Seu texto aqui, direto e técnico)
     """
 
     resposta_ia = llm_fn(prompt)
@@ -246,5 +237,4 @@ def explain_forecast_with_llm(
     if not resposta_ia:
         resposta_ia = "⚠️ A IA analisou os dados mas não retornou texto. Verifique sua conexão."
 
-    # Junta o Cabeçalho Fixo (Dados) com a Análise (IA)
     return header_report + "\n" + resposta_ia
