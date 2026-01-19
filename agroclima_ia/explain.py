@@ -51,8 +51,6 @@ def call_gemini_llm(prompt_text: str, api_key: str) -> str:
         config = genai.types.GenerationConfig(temperature=0.4)
         
         # LISTA DE MODELOS MODERNOS (Ordem de prioridade)
-        # O erro 404 aconteceu porque 'gemini-pro' antigo pode estar indisponível.
-        # Priorizamos o 1.5-flash que é mais rápido e estável.
         models_to_try = [
             'gemini-1.5-flash', 
             'gemini-1.5-pro', 
@@ -69,20 +67,17 @@ def call_gemini_llm(prompt_text: str, api_key: str) -> str:
             
             # Se a busca funcionou, filtra nossa lista
             if available_models:
-                # Mantém a ordem de preferência, mas só usa os que existem
                 models_to_try = [m for m in models_to_try if m in available_models]
-                # Se nenhum da nossa lista preferida existir, usa qualquer um disponível
                 if not models_to_try:
                     models_to_try = available_models
         except: 
-            pass # Se der erro ao listar, usa a lista hardcoded mesmo
+            pass 
 
         last_error = None
         
         # Loop de tentativa
         for model_name in models_to_try:
             try:
-                # Remove o prefixo 'models/' se vier da lista automática para evitar duplicação
                 if "models/" in model_name:
                     model_name = model_name.replace("models/", "")
                     
@@ -92,7 +87,7 @@ def call_gemini_llm(prompt_text: str, api_key: str) -> str:
                     return response.text
             except Exception as e:
                 last_error = e
-                continue # Tenta o próximo da lista
+                continue 
         
         return f"⚠️ Falha na IA. Nenhum modelo funcionou. Erro final: {last_error}"
 
@@ -135,14 +130,14 @@ def explain_forecast_with_llm(
     et0_total = float(df[et0_col].sum()) if et0_col in df.columns else 0.0
     saldo_total = float(df[saldo_col].sum()) if saldo_col in df.columns else 0.0
     
-    # 3. Monitoramento e Anomalias (Garantido pelo Python)
+    # 3. Monitoramento e Anomalias
     anomalies_dict = anomalies if isinstance(anomalies, dict) else None
     if anomalies and not isinstance(anomalies, dict): 
          anomalies_dict = {"has_critical": True, "messages": list(anomalies)}
     
     monitoramento_txt = _format_monitoramento_block(anomalies_dict)
 
-    # 4. Janelas Operacionais (Garantido pelo Python)
+    # 4. Janelas Operacionais
     pest_risk_txt = "BAIXO"
     if "pest_risk" in df.columns:
         vc = df["pest_risk"].value_counts()
@@ -160,10 +155,15 @@ def explain_forecast_with_llm(
         ok = (df["planting_status"] == "PLANTIO_OK").sum()
         if ok > 0: plantio_txt = f"{ok} dias FAVORÁVEIS ✅"
 
+    # --- AJUSTE AGRONÔMICO PARA SOJA (NOVO) ---
     adubacao_txt = "Verificar umidade."
-    if "nitrogen_status" in df.columns:
-        ok_n = (df["nitrogen_status"] == "N_OK").sum()
-        if ok_n > 0: adubacao_txt = f"{ok_n} dias FAVORÁVEIS ✅"
+    if "soja" in cultura.lower():
+        adubacao_txt = "Não se aplica (Fixação Biológica) 🦠"
+    else:
+        # Lógica normal para Milho, Trigo, etc.
+        if "nitrogen_status" in df.columns:
+            ok_n = (df["nitrogen_status"] == "N_OK").sum()
+            if ok_n > 0: adubacao_txt = f"{ok_n} dias FAVORÁVEIS ✅"
 
     # =========================================================================
     # MONTAGEM DO CABEÇALHO FIXO (Garante visualização dos dados)
@@ -233,7 +233,8 @@ def explain_forecast_with_llm(
     REGRAS DE OURO:
     1. Se o saldo hídrico for negativo, alerte sobre risco na adubação.
     2. Se estiver em V4/Vegetativo, NÃO mande plantar.
-    3. Seja direto e prático.
+    3. Se for SOJA, não recomende Nitrogênio (FBN).
+    4. Seja direto e prático.
 
     SAÍDA ESPERADA:
     **5. ANÁLISE E RECOMENDAÇÃO AGRONÔMICA (IA):**
