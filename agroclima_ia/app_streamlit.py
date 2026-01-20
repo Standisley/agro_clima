@@ -52,7 +52,7 @@ except ImportError:
 
 
 # =============================================================================
-# OTIMIZAÇÃO: Cache Inteligente (Automático - 30 DIAS)
+# OTIMIZAÇÃO: Cache do Modelo (30 DIAS)
 # =============================================================================
 @st.cache_resource
 def get_trained_model_cached(df_daily: pd.DataFrame, series_id: str):
@@ -63,8 +63,7 @@ def get_trained_model_cached(df_daily: pd.DataFrame, series_id: str):
     """
     model_checkpoint = cfg.MODELS_DIR / f"{series_id}_checkpoint.pkl"
     
-    # Tempo limite de validade do modelo em segundos
-    # 30 dias * 24 horas * 60 minutos * 60 segundos
+    # Tempo limite de validade do modelo em segundos (30 dias)
     MODEL_TTL_SECONDS = 30 * 24 * 60 * 60 
     
     should_retrain = True
@@ -90,7 +89,6 @@ def get_trained_model_cached(df_daily: pd.DataFrame, series_id: str):
             should_retrain = True
 
     # 3. Treina e Salva (se necessário)
-    # Removido st.toast/st.warning daqui para evitar erro de Cache
     print(f"Treinando IA para {series_id}...") 
     
     model, feature_cols = train_lightgbm_model(df_daily)
@@ -104,6 +102,34 @@ def get_trained_model_cached(df_daily: pd.DataFrame, series_id: str):
         print(f"Aviso: Não foi possível salvar o modelo em disco: {e}")
 
     return model, feature_cols
+
+
+# =============================================================================
+# OTIMIZAÇÃO: Cache da IA (SOLUÇÃO ERRO 429)
+# =============================================================================
+# Esta função "envelopa" a chamada do LLM. Se os dados (df, meta, key) não mudarem,
+# o Streamlit devolve o texto da memória sem gastar cota do Google.
+@st.cache_data(show_spinner=False, ttl=3600)
+def _generate_report_cached(_df_mgmt, _meta, _anomalies, _api_key):
+    
+    # Função lambda para passar a chave corretamente
+    def _my_llm_wrapper(prompt_txt: str) -> str:
+        return call_gemini_llm(prompt_txt, _api_key)
+    
+    # Se não tiver chave, retorna aviso sem chamar IA
+    if not _api_key:
+        return "⚠️ Chave de API não fornecida. O relatório de IA não pôde ser gerado."
+
+    return explain_forecast_with_llm(
+        _df_mgmt,
+        llm_fn=_my_llm_wrapper,
+        cultura=_meta.get("cultura", ""),
+        estagio_fenologico=_meta.get("estagio_fenologico", ""),
+        solo=_meta.get("solo", ""),
+        regiao=_meta.get("regiao", ""),
+        sistema=_meta.get("sistema", ""),
+        anomalies=_anomalies,
+    )
 
 
 # =============================================================================
@@ -138,49 +164,41 @@ def run_pipeline(farm_id: str, api_key: str = "") -> Tuple[str, pd.DataFrame, st
     lon = farm_cfg.get("lon", DEFAULT_LON)
     series_id = farm_cfg.get("series_id", DEFAULT_SERIES_ID)
 
+    # 1. Dados Históricos
     df_daily = load_or_download_daily_series(lat=lat, lon=lon, force_refresh=False)
-
     if df_daily is None or df_daily.empty:
         raise RuntimeError("Histórico climático vazio (erro API).")
 
-    # Chama a função inteligente (sem pedir permissão ao usuário)
+    # 2. Modelo Preditivo (Cacheado)
     model, feature_cols = get_trained_model_cached(df_daily, series_id)
-    
     mm_tomorrow = predict_tomorrow(df_daily, model, feature_cols=feature_cols)
 
+    # 3. Previsão Futura (OpenMeteo)
     forecast_df = forecast_next_days_with_openmeteo(
         df_daily=df_daily, model=model, days=7, lat=lat, lon=lon, mm_tomorrow=mm_tomorrow, meta=farm_cfg,
     )
-
     if forecast_df is None or forecast_df.empty:
         raise RuntimeError("Falha ao obter previsão futura (API).")
 
+    # 4. Lógica Agronômica
     forecast_df = calculate_pest_risk(forecast_df, meta=farm_cfg)
     forecast_mgmt, status_plantio = apply_management_windows(forecast_df, meta=farm_cfg)
     anomalies = detect_agro_anomalies(forecast_mgmt, meta=farm_cfg)
 
-    # Integração LLM
-    llm_function = None
-    if api_key and api_key.strip():
-        def _my_llm_wrapper(prompt_txt: str) -> str:
-            return call_gemini_llm(prompt_txt, api_key)
-        llm_function = _my_llm_wrapper
-
-    relatorio = explain_forecast_with_llm(
-        forecast_mgmt,
-        llm_fn=llm_function,
-        cultura=farm_cfg.get("cultura", ""),
-        estagio_fenologico=farm_cfg.get("estagio_fenologico", ""),
-        solo=farm_cfg.get("solo", ""),
-        regiao=farm_cfg.get("regiao", ""),
-        sistema=farm_cfg.get("sistema", ""),
-        anomalies=anomalies,
+    # 5. Geração do Relatório (COM CACHE)
+    # Convertemos anomalias para dict simples se necessário para o hash do cache
+    anomalies_dict = anomalies if isinstance(anomalies, dict) else {"data": anomalies}
+    
+    relatorio = _generate_report_cached(
+        _df_mgmt=forecast_mgmt,
+        _meta=farm_cfg,
+        _anomalies=anomalies_dict,
+        _api_key=api_key
     )
     
-    # --- BLINDAGEM CONTRA ERRO 'NoneType' (CORREÇÃO AQUI) ---
+    # Blindagem contra retorno nulo
     if relatorio is None:
-        relatorio = "⚠️ Erro Crítico: O gerador de relatório não retornou texto (None). Verifique se o módulo explain.py está atualizado."
-    # --------------------------------------------------------
+        relatorio = "⚠️ Erro Crítico: O gerador de relatório retornou vazio."
 
     tabela = _format_mgmt_table(forecast_mgmt)
     return relatorio, tabela, series_id
@@ -210,10 +228,15 @@ def main():
     st.sidebar.header("🌾 Configuração")
     
     # -----------------------------------------------------------------
-    # LÓGICA DE SEGREDOS
+    # LÓGICA DE SEGREDOS (CORRIGIDA E ROBUSTA)
     # -----------------------------------------------------------------
     st.sidebar.markdown("**🤖 Inteligência Artificial (LLM)**")
-    gemini_key = st.secrets.get("GEMINI_KEY", "")
+    
+    # Tenta ler GEMINI_KEY dos secrets
+    try:
+        gemini_key = st.secrets.get("GEMINI_KEY", "")
+    except FileNotFoundError:
+        gemini_key = ""
 
     if gemini_key:
         st.sidebar.success("🔑 Chave carregada automaticamente!")
@@ -253,8 +276,9 @@ def main():
                 )
             
             st.subheader("📋 Relatório Técnico")
-            # Agora 'relatorio' nunca será None, então .replace() funcionará
+            # Corrige quebra de linha para Markdown
             st.markdown(relatorio.replace("\n", "  \n"))
+            
             st.markdown("---") 
             st.subheader("📑 Tabela Técnica Semanal")
             st.dataframe(tabela, use_container_width=True)
