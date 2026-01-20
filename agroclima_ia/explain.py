@@ -103,8 +103,25 @@ def explain_forecast_with_llm(
 ) -> str:
     df = df_forecast.copy()
     
-    # --- 1. CONSULTA O ZARC ---
+    # --- 1. CONSULTA O ZARC E AJUSTA TÍTULO POR ESTÁGIO ---
     risco_zarc = check_zarc_risk(regiao, cultura, solo)
+    
+    # Determina o rótulo do ZARC com base no estágio
+    zarc_label = "STATUS ZARC (Risco Oficial)"
+    estagio_lower = str(estagio_fenologico).lower()
+    
+    # Se a planta já está implantada (fases pós-plantio), muda o rótulo para evitar confusão
+    fases_pos_plantio = [
+        "vegetativo", "v1", "v2", "v3", "v4", "v5", "perfilhamento", 
+        "crescimento", "reprodutivo", "r1", "r2", "r3", "r4", "r5", 
+        "enchimento", "maturacao", "colheita", "frutificacao", "espigamento"
+    ]
+    
+    # --- CORREÇÃO AQUI: Troquei 'em' por 'in' ---
+    if any(f in estagio_lower for f in fases_pos_plantio):
+        zarc_label = "RISCO CLIMÁTICO REGIONAL (ZARC Atual)"
+
+    # Formata o texto do risco
     if "20%" in risco_zarc: 
         zarc_txt = f"✅ DENTRO DA JANELA (Risco: {risco_zarc})"
     elif "30%" in risco_zarc or "40%" in risco_zarc: 
@@ -143,19 +160,47 @@ def explain_forecast_with_llm(
         if verde > 0: pulverizacao_txt = f"{verde} dias VERDE ✅"
         else: pulverizacao_txt = "Restrito (Amarelo/Vermelho) ⛔"
 
+    # --- LÓGICA DE PLANTIO ATUALIZADA (Lê CICLO_EM_ANDAMENTO) ---
     plantio_txt = "Inadequado."
     if "planting_status" in df.columns:
-        ok = (df["planting_status"] == "PLANTIO_OK").sum()
-        if ok > 0: plantio_txt = f"{ok} dias FAVORÁVEIS ✅"
+        # Se agronomy.py retornou que o ciclo está em andamento:
+        if (df["planting_status"] == "CICLO_EM_ANDAMENTO").any():
+            plantio_txt = "Ciclo em andamento (Plantio já realizado) 🌾"
+        else:
+            # Lógica padrão (BOM/OK)
+            # Aceita PLANTIO_BOM (novo) ou PLANTIO_OK (legado)
+            ok = (df["planting_status"].isin(["PLANTIO_BOM", "PLANTIO_OK"])).sum()
+            if ok > 0: 
+                plantio_txt = f"{ok} dias FAVORÁVEIS ✅"
+            else:
+                atencao = (df["planting_status"] == "PLANTIO_ATENCAO").sum()
+                if atencao > 0:
+                    plantio_txt = f"{atencao} dias COM ATENÇÃO ⚠️"
+                else:
+                    plantio_txt = "Restrito/Ruim ⛔"
 
-    # --- AJUSTE AGRONÔMICO PARA SOJA ---
+    # --- LÓGICA DE ADUBAÇÃO ATUALIZADA (Lê N_NAO_SE_APLICA) ---
     adubacao_txt = "Verificar umidade."
-    if "soja" in cultura.lower():
-        adubacao_txt = "Não se aplica (Fixação Biológica) 🦠"
-    else:
-        if "nitrogen_status" in df.columns:
+    
+    # 1. Verifica status retornado pelo agronomy.py
+    if "nitrogen_status" in df.columns:
+        if (df["nitrogen_status"] == "N_NAO_SE_APLICA").any():
+             adubacao_txt = "Não se aplica (Fase/Cultura) 🚫"
+        else:
             ok_n = (df["nitrogen_status"] == "N_OK").sum()
-            if ok_n > 0: adubacao_txt = f"{ok_n} dias FAVORÁVEIS ✅"
+            if ok_n > 0: 
+                adubacao_txt = f"{ok_n} dias FAVORÁVEIS ✅"
+            else:
+                # Fallback se não tiver dias ideais
+                atencao_n = (df["nitrogen_status"] == "N_ATENCAO").sum()
+                if atencao_n > 0:
+                    adubacao_txt = f"{atencao_n} dias COM ATENÇÃO ⚠️"
+                else:
+                    adubacao_txt = "Restrito/Risco ⛔"
+    
+    # 2. Safety net para Soja (caso o arquivo agronomy não esteja atualizado no ambiente)
+    if "soja" in cultura.lower() and "FAVORÁVEIS" in adubacao_txt:
+        adubacao_txt = "Não se aplica (Fixação Biológica) 🦠"
 
     # =========================================================================
     # MONTAGEM DO CABEÇALHO FIXO
@@ -165,7 +210,7 @@ def explain_forecast_with_llm(
     header_report = f"""### 📋 RELATÓRIO TÉCNICO: {cultura.upper()}
 📍 **{regiao}** | Solo: {solo}
 
-**1. STATUS ZARC (Risco Oficial):**
+**1. {zarc_label}:**
 👉 **{zarc_txt}**
 
 **2. CLIMA (Acumulado 7 dias):**
@@ -189,7 +234,6 @@ def explain_forecast_with_llm(
     # =========================================================================
     # LÓGICA DE CONTEXTO E PROMPT (REFINADA COM CAUSA DO ZARC)
     # =========================================================================
-    estagio_lower = str(estagio_fenologico).lower()
     
     # Lógica de Contexto
     if any(x in estagio_lower for x in ["v", "vegetativo", "perfilhamento", "crescimento"]):
@@ -201,7 +245,7 @@ def explain_forecast_with_llm(
     elif any(x in estagio_lower for x in ["r", "reprodutivo", "flor", "enchimento", "frutificacao"]):
         contexto = (
             "A CULTURA ESTÁ EM REPRODUÇÃO (Fase Crítica). "
-            "IMPORTANTE SOBRE O ZARC: Como a planta já está no campo, se o ZARC indica risco alto (30/40%), "
+            "IMPORTANTE SOBRE O ZARC: Como a planta já está no campo, se o ZARC indica risco alto (30/40%) ou FORA, "
             "EXPLIQUE O MOTIVO PROVÁVEL (Ex: Risco de Veranico/Deficiência Hídrica nesta época ou excesso de chuva). "
             "O ZARC aqui serve como ALERTA DE ESTRESSE CLIMÁTICO, não de plantio."
         )
@@ -223,9 +267,9 @@ def explain_forecast_with_llm(
     Escreva APENAS o item "5. ANÁLISE E RECOMENDAÇÃO AGRONÔMICA (IA)".
     
     DIRETRIZES ESPECÍFICAS:
-    1. **Explique o ZARC:** Se o risco for 20%, diga que o ambiente está seguro. Se for 30% ou 40%, explique QUE TIPO de risco o produtor corre agora (provavelmente seca ou chuva excessiva, dependendo do saldo hídrico acima).
+    1. **Explique o ZARC:** Se o risco for 20%, diga que o ambiente está seguro. Se for 30% ou 40% ou FORA, explique QUE TIPO de risco o produtor corre agora (provavelmente seca ou chuva excessiva, dependendo do saldo hídrico acima).
     2. **Soja em R1:** O foco é sanidade (Ferrugem) e Água. O risco ZARC indica vulnerabilidade climática.
-    3. **Nitrogênio:** Se for Soja, confirme que não precisa de N.
+    3. **Nitrogênio:** Se for Soja ou fase final, confirme que não precisa de N.
     
     SAÍDA ESPERADA:
     **5. ANÁLISE E RECOMENDAÇÃO AGRONÔMICA (IA):**

@@ -7,34 +7,47 @@ from typing import Literal
 import numpy as np
 import pandas as pd
 
-PlantingStatus = Literal["PLANTIO_BOM", "PLANTIO_ATENCAO", "PLANTIO_RUIM"]
-NitrogenStatus = Literal["N_OK", "N_ATENCAO", "N_RISCO"]
+# Atualizei os tipos para incluir os novos status de "trava agronômica"
+PlantingStatus = Literal["PLANTIO_BOM", "PLANTIO_ATENCAO", "PLANTIO_RUIM", "CICLO_EM_ANDAMENTO"]
+NitrogenStatus = Literal["N_OK", "N_ATENCAO", "N_RISCO", "N_NAO_SE_APLICA"]
 
 
 def classify_planting_window(
     df_forecast: pd.DataFrame,
     cultura: str | None = None,
     solo: str | None = None,
+    estagio: str | None = None,  # <--- Novo parâmetro para filtrar fase
 ) -> tuple[pd.DataFrame, PlantingStatus]:
     """
-    Classifica a janela de plantio (no horizonte da previsão) em:
-      - PLANTIO_BOM
-      - PLANTIO_ATENCAO
-      - PLANTIO_RUIM
-
-    Regra simplificada (heurística climatológica):
-    - Usamos chuva total, ET0 total e razão chuva/ET0.
-    - Queremos evitar:
-        * seca extrema (quase nada de chuva + ET0 alta)
-        * encharcamento extremo (chuva >> ET0)
-    - Para plantio em sequeiro, em geral:
-        * Razão chuva/ET0 ~ 0.6–1.2 => janela boa ou com atenção
-        * Muito abaixo disso => atenção/ruim (risco de falha de emergência)
-        * Muito acima disso => atenção/ruim (risco de encharcamento em solo pesado)
+    Classifica a janela de plantio.
+    CORREÇÃO: Verifica se a cultura já está implantada para não recomendar plantio
+    no meio do ciclo.
     """
 
     df = df_forecast.copy()
+    
+    # -------------------------------------------------------------------------
+    # 1. TRAVA DE ESTÁGIO FENOLÓGICO (Correção Agronômica)
+    # -------------------------------------------------------------------------
+    # Se a planta já está no campo, não faz sentido calcular janela de plantio.
+    estagio_lower = str(estagio or "").strip().lower()
+    
+    # Lista de fases que indicam que o plantio JÁ ACONTECEU
+    fases_implantadas = [
+        "v", "vegetativo", "perfilhamento", "crescimento",
+        "r", "reprodutivo", "flor", "enchimento", "maturacao", 
+        "colheita", "frutificacao", "espigamento"
+    ]
+    
+    # Se encontrar qualquer termo acima no estágio, trava o status.
+    if any(fase in estagio_lower for fase in fases_implantadas):
+        planting_status: PlantingStatus = "CICLO_EM_ANDAMENTO"
+        df["planting_status"] = planting_status
+        return df, planting_status
 
+    # -------------------------------------------------------------------------
+    # 2. Lógica Climatológica Original (Chuva vs ET0)
+    # -------------------------------------------------------------------------
     rain_col = "y_ensemble_mm"
     et0_col = "om_et0_fao_mm"
 
@@ -48,14 +61,8 @@ def classify_planting_window(
     if total_et0 is not None and total_et0 > 0:
         ratio = total_rain / total_et0
 
-    # Heurística:
-    # - ratio < 0.4  => PLANTIO_RUIM (pouca umidade prevista)
-    # - 0.4 <= ratio < 0.7 => PLANTIO_ATENCAO
-    # - 0.7 <= ratio <= 1.3 => PLANTIO_BOM (janela equilibrada)
-    # - ratio > 1.3 => PLANTIO_ATENCAO (possível excesso / encharcamento em solo argiloso)
+    # Heurística original mantida:
     if ratio is None:
-        planting_status: PlantingStatus
-        # fallback usando apenas chuva total
         if total_rain < 5:
             planting_status = "PLANTIO_RUIM"
         elif total_rain <= 20:
@@ -70,9 +77,9 @@ def classify_planting_window(
         elif ratio <= 1.3:
             planting_status = "PLANTIO_BOM"
         else:
+            # Excesso de chuva/encharcamento
             planting_status = "PLANTIO_ATENCAO"
 
-    # Colocamos a mesma classificação em todas as linhas do horizonte
     df["planting_status"] = planting_status
 
     return df, planting_status
@@ -80,25 +87,12 @@ def classify_planting_window(
 
 def classify_nitrogen_window(
     df_forecast: pd.DataFrame,
+    cultura: str | None = None,   # <--- Necessário para regra da Soja
+    estagio: str | None = None,   # <--- Necessário para regra de final de ciclo
 ) -> pd.DataFrame:
     """
-    Classifica, dia a dia, janelas para adubação nitrogenada de cobertura.
-
-    Ideia geral (simplificada):
-    - Boa janela de N (N_OK):
-        * chuva acumulada no dia + 2 dias seguintes entre 5 e 25 mm
-        * sem estresse térmico no dia
-    - Atenção (N_ATENCAO):
-        * chuva acumulada entre 2 e 40 mm
-        * OU leve estresse térmico, mas sem chuva extrema
-    - Risco (N_RISCO):
-        * chuva acumulada < 2 mm (risco de não incorporar o N)
-        * OU chuva acumulada > 40 mm (risco de perda/lixiviação)
-        * OU estresse térmico forte no dia (heat_stress = True)
-
-    Usamos:
-      - y_ensemble_mm (chuva)
-      - heat_stress (se existir)
+    Classifica janelas para adubação nitrogenada.
+    CORREÇÃO: Bloqueia N para Soja e para fases finais (enchimento/maturação).
     """
 
     df = df_forecast.copy()
@@ -106,10 +100,29 @@ def classify_nitrogen_window(
     if "y_ensemble_mm" not in df.columns:
         raise ValueError("DataFrame de previsão precisa da coluna 'y_ensemble_mm' para N.")
 
+    # -------------------------------------------------------------------------
+    # 1. TRAVAS AGRONÔMICAS (Correção)
+    # -------------------------------------------------------------------------
+    cultura_lower = str(cultura or "").strip().lower()
+    estagio_lower = str(estagio or "").strip().lower()
+
+    # Regra A: Soja praticamente não usa N mineral (Fixação Biológica)
+    if "soja" in cultura_lower:
+        df["nitrogen_status"] = "N_NAO_SE_APLICA"
+        return df
+
+    # Regra B: Não se aplica N no final do ciclo (Enchimento/Maturação)
+    fases_finais = ["enchimento", "maturacao", "colheita", "r5", "r6", "r7", "r8"]
+    if any(f in estagio_lower for f in fases_finais):
+        df["nitrogen_status"] = "N_NAO_SE_APLICA"
+        return df
+
+    # -------------------------------------------------------------------------
+    # 2. Lógica Climatológica Original
+    # -------------------------------------------------------------------------
     rain = df["y_ensemble_mm"].to_numpy()
     n = len(rain)
 
-    # Se não houver coluna heat_stress, consideramos False
     if "heat_stress" not in df.columns:
         heat = np.zeros(n, dtype=bool)
     else:
@@ -123,12 +136,14 @@ def classify_nitrogen_window(
         hs_today = bool(heat[i])
 
         if hs_today:
-            # dia com estresse térmico considerado de maior risco para N
+            # Estresse térmico = alto risco de volatilização
             status: NitrogenStatus = "N_RISCO"
         else:
             if rain_window < 2.0:
+                # Muito seco = não incorpora
                 status = "N_RISCO"
             elif rain_window > 40.0:
+                # Muita chuva = lixiviação
                 status = "N_RISCO"
             elif 5.0 <= rain_window <= 25.0:
                 status = "N_OK"
