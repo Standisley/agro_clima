@@ -1,0 +1,2 @@
+# Ignorar segredos do Streamlit
+.streamlit/secrets.tomlcdcd
