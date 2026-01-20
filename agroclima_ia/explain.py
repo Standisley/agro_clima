@@ -39,7 +39,7 @@ def _format_monitoramento_block(anomalies: Optional[Dict[str, Any]]) -> str:
     return texto.strip()
 
 # =============================================================================
-# Função Conexão LLM (ATUALIZADA)
+# Função Conexão LLM (DESCOBERTA AUTOMÁTICA DE MODELO)
 # =============================================================================
 def call_gemini_llm(prompt_text: str, api_key: str) -> str:
     if not HAS_GOOGLE_LIB: return "⚠️ Erro: Biblioteca 'google-generativeai' não instalada."
@@ -49,40 +49,47 @@ def call_gemini_llm(prompt_text: str, api_key: str) -> str:
         genai.configure(api_key=api_key)
         config = genai.types.GenerationConfig(temperature=0.4)
         
-        models_to_try = [
-            'gemini-1.5-flash', 
-            'gemini-1.5-pro', 
-            'gemini-1.0-pro', 
-            'gemini-pro'
-        ]
-        
+        # --- SOLUÇÃO DEFINITIVA: Listar modelos disponíveis em vez de adivinhar ---
         try:
             available_models = []
             for m in genai.list_models():
                 if 'generateContent' in m.supported_generation_methods:
                     available_models.append(m.name)
             
-            if available_models:
-                models_to_try = [m for m in models_to_try if m in available_models]
-                if not models_to_try:
-                    models_to_try = available_models
-        except: 
-            pass 
+            # Estratégia de prioridade: Flash > Pro 1.5 > Pro 1.0 > Qualquer um
+            chosen_model = None
+            
+            # 1. Tenta achar o Flash (mais rápido/barato)
+            for m in available_models:
+                if 'flash' in m.lower():
+                    chosen_model = m
+                    break
+            
+            # 2. Se não achar, tenta o Pro 1.5
+            if not chosen_model:
+                for m in available_models:
+                    if '1.5-pro' in m.lower():
+                        chosen_model = m
+                        break
+            
+            # 3. Se não achar, pega o primeiro da lista (gemini-pro antigo)
+            if not chosen_model and available_models:
+                chosen_model = available_models[0]
 
-        last_error = None
-        for model_name in models_to_try:
-            try:
-                if "models/" in model_name:
-                    model_name = model_name.replace("models/", "")
-                model = genai.GenerativeModel(model_name)
-                response = model.generate_content(prompt_text, generation_config=config)
-                if response and response.text:
-                    return response.text
-            except Exception as e:
-                last_error = e
-                continue 
+            if not chosen_model:
+                return "⚠️ Falha: Nenhum modelo de texto encontrado na sua API Key."
+
+            # Gera com o modelo encontrado
+            model = genai.GenerativeModel(chosen_model)
+            response = model.generate_content(prompt_text, generation_config=config)
+            
+            if response and response.text:
+                return response.text
+                
+        except Exception as e:
+            return f"⚠️ Erro ao listar/chamar modelos: {e}"
         
-        return f"⚠️ Falha na IA. Nenhum modelo funcionou. Erro final: {last_error}"
+        return "⚠️ Falha na IA. Resposta vazia."
 
     except Exception as e:
         return f"⚠️ Erro Geral Conexão LLM: {e}"
@@ -103,56 +110,47 @@ def explain_forecast_with_llm(
 ) -> str:
     df = df_forecast.copy()
     
-    # --- 1. CONSULTA O ZARC E AJUSTA TÍTULO POR ESTÁGIO ---
+    # 1. ZARC INTELIGENTE
     risco_zarc = check_zarc_risk(regiao, cultura, solo)
-    
-    # Determina o rótulo do ZARC com base no estágio
     zarc_label = "STATUS ZARC (Risco Oficial)"
     estagio_lower = str(estagio_fenologico).lower()
     
-    # Se a planta já está implantada (fases pós-plantio), muda o rótulo para evitar confusão
     fases_pos_plantio = [
         "vegetativo", "v1", "v2", "v3", "v4", "v5", "perfilhamento", 
         "crescimento", "reprodutivo", "r1", "r2", "r3", "r4", "r5", 
         "enchimento", "maturacao", "colheita", "frutificacao", "espigamento"
     ]
     
-    # --- CORREÇÃO AQUI: Troquei 'em' por 'in' ---
     if any(f in estagio_lower for f in fases_pos_plantio):
         zarc_label = "RISCO CLIMÁTICO REGIONAL (ZARC Atual)"
 
-    # Formata o texto do risco
-    if "20%" in risco_zarc: 
-        zarc_txt = f"✅ DENTRO DA JANELA (Risco: {risco_zarc})"
-    elif "30%" in risco_zarc or "40%" in risco_zarc: 
-        zarc_txt = f"⚠️ RISCO MÉDIO/ALTO ({risco_zarc})"
-    elif "FORA" in risco_zarc: 
-        zarc_txt = f"⛔ {risco_zarc} (Sem cobertura de seguro)"
-    else: 
-        zarc_txt = f"ℹ️ {risco_zarc}"
+    if "20%" in risco_zarc: zarc_txt = f"✅ DENTRO DA JANELA (Risco: {risco_zarc})"
+    elif "30%" in risco_zarc or "40%" in risco_zarc: zarc_txt = f"⚠️ RISCO MÉDIO/ALTO ({risco_zarc})"
+    elif "FORA" in risco_zarc: zarc_txt = f"⛔ {risco_zarc} (Sem cobertura de seguro)"
+    else: zarc_txt = f"ℹ️ {risco_zarc}"
 
     # 2. Dados Climáticos
-    chuva_col = "y_ensemble_mm" if "y_ensemble_mm" in df.columns else "y"
-    et0_col = "om_et0_fao_mm"
-    saldo_col = "water_balance_mm"
-
-    chuva_total = float(df[chuva_col].sum()) if chuva_col in df.columns else 0.0
-    et0_total = float(df[et0_col].sum()) if et0_col in df.columns else 0.0
-    saldo_total = float(df[saldo_col].sum()) if saldo_col in df.columns else 0.0
+    chuva_total = float(df["y_ensemble_mm"].sum()) if "y_ensemble_mm" in df.columns else 0.0
+    et0_total = float(df["om_et0_fao_mm"].sum()) if "om_et0_fao_mm" in df.columns else 0.0
+    saldo_total = float(df["water_balance_mm"].sum()) if "water_balance_mm" in df.columns else 0.0
     
     # 3. Monitoramento e Anomalias
     anomalies_dict = anomalies if isinstance(anomalies, dict) else None
     if anomalies and not isinstance(anomalies, dict): 
          anomalies_dict = {"has_critical": True, "messages": list(anomalies)}
-    
     monitoramento_txt = _format_monitoramento_block(anomalies_dict)
 
     # 4. Janelas Operacionais
+    pest_risk_level = "BAIXO" 
     pest_risk_txt = "BAIXO"
     if "pest_risk" in df.columns:
         vc = df["pest_risk"].value_counts()
-        if vc.get("RISCO_ALTO_FERRUGEM", 0) > 0: pest_risk_txt = "ALTO 🚩"
-        elif vc.get("RISCO_ATENÇÃO", 0) > 0: pest_risk_txt = "ATENÇÃO ⚠️"
+        if vc.get("RISCO_ALTO_FERRUGEM", 0) > 0: 
+            pest_risk_txt = "ALTO 🚩"
+            pest_risk_level = "ALTO"
+        elif vc.get("RISCO_ATENÇÃO", 0) > 0: 
+            pest_risk_txt = "ATENÇÃO ⚠️"
+            pest_risk_level = "MEDIO"
 
     pulverizacao_txt = "Sem janelas."
     if "spray_status" in df.columns:
@@ -160,51 +158,44 @@ def explain_forecast_with_llm(
         if verde > 0: pulverizacao_txt = f"{verde} dias VERDE ✅"
         else: pulverizacao_txt = "Restrito (Amarelo/Vermelho) ⛔"
 
-    # --- LÓGICA DE PLANTIO ATUALIZADA (Lê CICLO_EM_ANDAMENTO) ---
+    # Plantio
     plantio_txt = "Inadequado."
     if "planting_status" in df.columns:
-        # Se agronomy.py retornou que o ciclo está em andamento:
         if (df["planting_status"] == "CICLO_EM_ANDAMENTO").any():
             plantio_txt = "Ciclo em andamento (Plantio já realizado) 🌾"
         else:
-            # Lógica padrão (BOM/OK)
-            # Aceita PLANTIO_BOM (novo) ou PLANTIO_OK (legado)
             ok = (df["planting_status"].isin(["PLANTIO_BOM", "PLANTIO_OK"])).sum()
-            if ok > 0: 
-                plantio_txt = f"{ok} dias FAVORÁVEIS ✅"
+            if ok > 0: plantio_txt = f"{ok} dias FAVORÁVEIS ✅"
             else:
                 atencao = (df["planting_status"] == "PLANTIO_ATENCAO").sum()
-                if atencao > 0:
-                    plantio_txt = f"{atencao} dias COM ATENÇÃO ⚠️"
-                else:
-                    plantio_txt = "Restrito/Ruim ⛔"
+                if atencao > 0: plantio_txt = f"{atencao} dias COM ATENÇÃO ⚠️"
+                else: plantio_txt = "Restrito/Ruim ⛔"
 
-    # --- LÓGICA DE ADUBAÇÃO ATUALIZADA (Lê N_NAO_SE_APLICA) ---
+    # Adubação
     adubacao_txt = "Verificar umidade."
-    
-    # 1. Verifica status retornado pelo agronomy.py
+    adubacao_status_code = "NORMAL"
     if "nitrogen_status" in df.columns:
         if (df["nitrogen_status"] == "N_NAO_SE_APLICA").any():
              adubacao_txt = "Não se aplica (Fase/Cultura) 🚫"
+             adubacao_status_code = "NAO_APLICA"
         else:
             ok_n = (df["nitrogen_status"] == "N_OK").sum()
             if ok_n > 0: 
                 adubacao_txt = f"{ok_n} dias FAVORÁVEIS ✅"
+                adubacao_status_code = "FAVORAVEL"
             else:
-                # Fallback se não tiver dias ideais
                 atencao_n = (df["nitrogen_status"] == "N_ATENCAO").sum()
                 if atencao_n > 0:
                     adubacao_txt = f"{atencao_n} dias COM ATENÇÃO ⚠️"
+                    adubacao_status_code = "ATENCAO"
                 else:
                     adubacao_txt = "Restrito/Risco ⛔"
+                    adubacao_status_code = "RISCO"
     
-    # 2. Safety net para Soja (caso o arquivo agronomy não esteja atualizado no ambiente)
     if "soja" in cultura.lower() and "FAVORÁVEIS" in adubacao_txt:
         adubacao_txt = "Não se aplica (Fixação Biológica) 🦠"
+        adubacao_status_code = "NAO_APLICA"
 
-    # =========================================================================
-    # MONTAGEM DO CABEÇALHO FIXO
-    # =========================================================================
     saldo_icon = '🔵 Superávit' if saldo_total >= 0 else '🟠 Déficit'
     
     header_report = f"""### 📋 RELATÓRIO TÉCNICO: {cultura.upper()}
@@ -231,54 +222,52 @@ def explain_forecast_with_llm(
     if llm_fn is None:
         return header_report + "\n*(Modo Offline - Sem análise de IA)*"
 
-    # =========================================================================
-    # LÓGICA DE CONTEXTO E PROMPT (REFINADA COM CAUSA DO ZARC)
-    # =========================================================================
-    
-    # Lógica de Contexto
-    if any(x in estagio_lower for x in ["v", "vegetativo", "perfilhamento", "crescimento"]):
-        contexto = (
-            "A CULTURA JÁ ESTÁ PLANTADA E EM CRESCIMENTO VEGETATIVO. "
-            "NÃO RECOMENDE PLANTIO. "
-            "FOQUE EM: Adubação de cobertura (se não for soja) e Pragas (Lagartas)."
-        )
-    elif any(x in estagio_lower for x in ["r", "reprodutivo", "flor", "enchimento", "frutificacao"]):
-        contexto = (
-            "A CULTURA ESTÁ EM REPRODUÇÃO (Fase Crítica). "
-            "IMPORTANTE SOBRE O ZARC: Como a planta já está no campo, se o ZARC indica risco alto (30/40%) ou FORA, "
-            "EXPLIQUE O MOTIVO PROVÁVEL (Ex: Risco de Veranico/Deficiência Hídrica nesta época ou excesso de chuva). "
-            "O ZARC aqui serve como ALERTA DE ESTRESSE CLIMÁTICO, não de plantio."
-        )
-    elif any(x in estagio_lower for x in ["colheita", "maturacao"]):
-        contexto = "A CULTURA ESTÁ EM MATURAÇÃO/COLHEITA. Foque em logística e umidade do grão."
-    else:
-        contexto = "Geral."
+    # --- DEFINIÇÃO DE DOENÇAS ---
+    foco_sanidade = "Doenças fúngicas gerais"
+    c_clean = cultura.lower()
+    if "soja" in c_clean: foco_sanidade = "Ferrugem Asiática"
+    elif "arroz" in c_clean: foco_sanidade = "Brusone"
+    elif "trigo" in c_clean: foco_sanidade = "Giberela/Brusone"
+    elif "milho" in c_clean: foco_sanidade = "Cercosporiose/Ferrugem Polissora"
+    elif "cafe" in c_clean: foco_sanidade = "Ferrugem/Cercosporiose"
 
+    # --- PROMPT BLINDADO ---
     prompt = f"""
     Atue como o Agrônomo Sênior do AgroClima IA.
     
     DADOS DO RELATÓRIO:
     {header_report}
     
-    ESTÁGIO ATUAL: {estagio_fenologico}
-    CONTEXTO OBRIGATÓRIO: {contexto}
+    VARIÁVEIS DE CONTROLE:
+    - Cultura: {cultura}
+    - Risco Fitossanitário Calculado: {pest_risk_level}
+    - Status Adubação: {adubacao_status_code}
+    - Saldo Hídrico: {saldo_total:.1f} mm
     
     SUA TAREFA:
     Escreva APENAS o item "5. ANÁLISE E RECOMENDAÇÃO AGRONÔMICA (IA)".
     
-    DIRETRIZES ESPECÍFICAS:
-    1. **Explique o ZARC:** Se o risco for 20%, diga que o ambiente está seguro. Se for 30% ou 40% ou FORA, explique QUE TIPO de risco o produtor corre agora (provavelmente seca ou chuva excessiva, dependendo do saldo hídrico acima).
-    2. **Soja em R1:** O foco é sanidade (Ferrugem) e Água. O risco ZARC indica vulnerabilidade climática.
-    3. **Nitrogênio:** Se for Soja ou fase final, confirme que não precisa de N.
+    REGRAS DE OURO:
+    
+    1. **SOBRE DOENÇAS ({foco_sanidade}):**
+       - OLHE A VARIÁVEL 'Risco Fitossanitário Calculado' ACIMA.
+       - Se for "BAIXO": Você é PROIBIDO de dizer que há risco alto de doenças. Diga que "as condições climáticas atuais desfavorecem {foco_sanidade}, mas o monitoramento segue preventivo".
+       - APENAS se for "ALTO" ou "MEDIO", você deve alertar perigo iminente.
+       - Calor seco MATA fungo. Não associe calor > 36C com doença fúngica.
+    
+    2. **SOBRE ADUBAÇÃO (NITROGÊNIO):**
+       - Se o status for "ATENÇÃO" ou "RISCO" e o Saldo Hídrico for negativo (Déficit): A recomendação é SUSPENDER ou TER EXTREMA CAUTELA.
+       - Explique: "Com déficit hídrico de {saldo_total:.1f} mm, a aplicação de N tem baixa eficiência e alto risco de volatilização/fitotoxidez. Aguarde umidade."
+    
+    3. **SOBRE O CLIMA:**
+       - Seja direto. Se tem déficit e calor, o foco é estresse hídrico.
     
     SAÍDA ESPERADA:
     **5. ANÁLISE E RECOMENDAÇÃO AGRONÔMICA (IA):**
-    (Seu texto aqui, direto e técnico)
+    (Texto curto, técnico, sem inventar riscos que a tabela nega)
     """
 
     resposta_ia = llm_fn(prompt)
-    
-    if not resposta_ia:
-        resposta_ia = "⚠️ A IA analisou os dados mas não retornou texto. Verifique sua conexão."
+    if not resposta_ia: resposta_ia = "⚠️ Erro na IA."
 
     return header_report + "\n" + resposta_ia
