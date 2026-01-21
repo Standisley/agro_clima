@@ -1,2 +1,3 @@
-# Ignorar segredos do Streamlit
-.streamlit/secrets.tomlcdcd
+.streamlit/
+secrets.toml
+__pycache__/
