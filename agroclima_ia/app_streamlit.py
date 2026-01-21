@@ -105,12 +105,11 @@ def get_trained_model_cached(df_daily: pd.DataFrame, series_id: str):
 
 
 # =============================================================================
-# OTIMIZAÇÃO: Cache da IA (SOLUÇÃO ERRO 429)
+# OTIMIZAÇÃO: Cache da IA (SOLUÇÃO ERRO 429 + CORREÇÃO DE TROCA DE FAZENDA)
 # =============================================================================
-# Esta função "envelopa" a chamada do LLM. Se os dados (df, meta, key) não mudarem,
-# o Streamlit devolve o texto da memória sem gastar cota do Google.
+# Adicionei 'key_check' para obrigar o cache a atualizar se a fazenda mudar
 @st.cache_data(show_spinner=False, ttl=3600)
-def _generate_report_cached(_df_mgmt, _meta, _anomalies, _api_key):
+def _generate_report_cached(_df_mgmt, _meta, _anomalies, _api_key, key_check):
     
     # Função lambda para passar a chave corretamente
     def _my_llm_wrapper(prompt_txt: str) -> str:
@@ -120,13 +119,18 @@ def _generate_report_cached(_df_mgmt, _meta, _anomalies, _api_key):
     if not _api_key:
         return "⚠️ Chave de API não fornecida. O relatório de IA não pôde ser gerado."
 
+    # Garante que os valores sejam strings para o explain.py não se perder
+    cultura_str = str(_meta.get("cultura", ""))
+    regiao_str = str(_meta.get("regiao", ""))
+    solo_str = str(_meta.get("solo", ""))
+
     return explain_forecast_with_llm(
         _df_mgmt,
         llm_fn=_my_llm_wrapper,
-        cultura=_meta.get("cultura", ""),
+        cultura=cultura_str,
         estagio_fenologico=_meta.get("estagio_fenologico", ""),
-        solo=_meta.get("solo", ""),
-        regiao=_meta.get("regiao", ""),
+        solo=solo_str,
+        regiao=regiao_str,
         sistema=_meta.get("sistema", ""),
         anomalies=_anomalies,
     )
@@ -185,15 +189,19 @@ def run_pipeline(farm_id: str, api_key: str = "") -> Tuple[str, pd.DataFrame, st
     forecast_mgmt, status_plantio = apply_management_windows(forecast_df, meta=farm_cfg)
     anomalies = detect_agro_anomalies(forecast_mgmt, meta=farm_cfg)
 
-    # 5. Geração do Relatório (COM CACHE)
-    # Convertemos anomalias para dict simples se necessário para o hash do cache
+    # 5. Geração do Relatório (COM CACHE E CHAVE ÚNICA)
     anomalies_dict = anomalies if isinstance(anomalies, dict) else {"data": anomalies}
     
+    # --- CRIAÇÃO DA CHAVE ÚNICA PARA O CACHE ---
+    # Isso garante que 'Soja Goiania' seja diferente de 'Milho Campo Grande'
+    unique_key = f"{farm_cfg.get('cultura')}_{farm_cfg.get('regiao')}_{series_id}"
+
     relatorio = _generate_report_cached(
         _df_mgmt=forecast_mgmt,
         _meta=farm_cfg,
         _anomalies=anomalies_dict,
-        _api_key=api_key
+        _api_key=api_key,
+        key_check=unique_key  # <--- CORREÇÃO AQUI
     )
     
     # Blindagem contra retorno nulo

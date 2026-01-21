@@ -110,6 +110,10 @@ def explain_forecast_with_llm(
 ) -> str:
     df = df_forecast.copy()
     
+    # Garante que cultura é string para evitar erro
+    cultura = str(cultura) if cultura else "Cultura N/D"
+    regiao = str(regiao) if regiao else "Região N/D"
+
     # 1. ZARC INTELIGENTE
     risco_zarc = check_zarc_risk(regiao, cultura, solo)
     zarc_label = "STATUS ZARC (Risco Oficial)"
@@ -137,7 +141,7 @@ def explain_forecast_with_llm(
     # 3. Monitoramento e Anomalias
     anomalies_dict = anomalies if isinstance(anomalies, dict) else None
     if anomalies and not isinstance(anomalies, dict): 
-         anomalies_dict = {"has_critical": True, "messages": list(anomalies)}
+          anomalies_dict = {"has_critical": True, "messages": list(anomalies)}
     monitoramento_txt = _format_monitoramento_block(anomalies_dict)
 
     # 4. Janelas Operacionais
@@ -198,6 +202,7 @@ def explain_forecast_with_llm(
 
     saldo_icon = '🔵 Superávit' if saldo_total >= 0 else '🟠 Déficit'
     
+    # --- CABEÇALHO FORMATADO (Aqui entra a correção da Cultura/Região) ---
     header_report = f"""### 📋 RELATÓRIO TÉCNICO: {cultura.upper()}
 📍 **{regiao}** | Solo: {solo}
 
