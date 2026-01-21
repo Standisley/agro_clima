@@ -8,7 +8,7 @@ from typing import Any, Dict, List, Optional, Tuple
 import numpy as np
 import pandas as pd
 import requests
-import streamlit as st  # <--- IMPORT NOVO E NECESSÁRIO
+import streamlit as st 
 
 from .et0 import fetch_et0_fao_daily
 from . import config as cfg
@@ -41,7 +41,6 @@ def _download_openmeteo_historical(
 ) -> pd.DataFrame:
     """
     Faz download do histórico diário (chuva + clima) da Open-Meteo.
-    (Esta função interna não precisa de cache direto, pois a função 'pai' load_or_download terá).
     """
     base_url = "https://archive-api.open-meteo.com/v1/archive"
 
@@ -161,7 +160,6 @@ def load_or_download_daily_series(
         try:
             df_local = pd.read_csv(cfg.DAILY_RAIN_CSV, parse_dates=["ds"])
             if not df_local.empty:
-                # print(f"[data_fetch] Usando série local cacheada em {cfg.DAILY_RAIN_CSV}")
                 return df_local
         except Exception as e:
             print(f"[data_fetch] Erro ao ler CSV local: {e}. Baixando novamente...")
@@ -176,7 +174,7 @@ def load_or_download_daily_series(
 
     df_hist = _merge_farm_observations(df_hist)
 
-    # Salva CSV para persistência, mas o app usa a memória do cache
+    # Salva CSV para persistência
     try:
         df_reset = df_hist.reset_index(drop=True)
         df_reset.to_csv(cfg.DAILY_RAIN_CSV, index=False)
@@ -248,7 +246,6 @@ def predict_tomorrow(
     from .features import create_rain_features
 
     if df_daily is None or df_daily.empty:
-        # raise ValueError("df_daily está vazio.") # Retornar 0.0 é mais seguro pro app
         return 0.0
 
     df_features, _ = create_rain_features(df_daily, target_col="y")
@@ -264,7 +261,6 @@ def predict_tomorrow(
 
 
 # --- OTIMIZAÇÃO 2: FUNÇÃO CACHEADA PARA DADOS FUTUROS ---
-# Isola a chamada da API para que o cache funcione (evita baixar a cada clique)
 @st.cache_data(ttl=3600, show_spinner=False)
 def _fetch_future_data_raw(lat, lon, start_iso, end_iso):
     """Baixa previsão futura da Open-Meteo com Cache."""
@@ -315,7 +311,6 @@ def forecast_next_days_with_openmeteo(
 
     try:
         _print(f"[future_forecast] Baixando previsão diária {today} -> {end_date}")
-        # --- MUDANÇA AQUI: USA A FUNÇÃO CACHEADA ---
         data = _fetch_future_data_raw(lat, lon, today.isoformat(), end_date.isoformat())
     except Exception as e:
         _print(f"[future_forecast] ❌ ERRO DE CONEXÃO/API: {e}. Retornando None.")
@@ -351,7 +346,6 @@ def forecast_next_days_with_openmeteo(
         df_daily2["ds"] = pd.to_datetime(df_daily2["ds"])
 
     df_future = df_om[["ds", "om_temp2m_max", "om_windspeed10_max", "om_rh2m_max"]].copy()
-    # MANTIDO: evita dropna(subset=['y']) matar o horizonte futuro
     df_future["y"] = 0.0
 
     df_concat = pd.concat([df_daily2, df_future], ignore_index=True)
@@ -364,12 +358,10 @@ def forecast_next_days_with_openmeteo(
 
     if df_features.empty:
         use_model = False
-        _print("[future_forecast] AVISO: df_features vazio; usando apenas precipitação da Open-Meteo.")
     else:
         future_mask = df_features["ds"] >= df_om["ds"].min()
         df_future_feats = df_features.loc[future_mask].copy()
 
-        # Tenta pegar nomes de features do modelo
         try:
             model_feature_cols = list(getattr(model, "feature_name")())
         except Exception:
@@ -386,14 +378,12 @@ def forecast_next_days_with_openmeteo(
 
         if X_future is None or X_future.empty or X_future.shape[1] == 0:
             use_model = False
-            _print("[future_forecast] AVISO: Nenhuma feature futura gerada; usando apenas precipitação da Open-Meteo.")
         else:
             try:
                 y_hat_model = model.predict(X_future)
                 use_model = True
-            except Exception as e:
+            except Exception:
                 use_model = False
-                # _print(f"[future_forecast] AVISO: Falha ao prever com modelo ({e})")
 
     # 3) Merge final
     df_om2 = df_om.copy().sort_values("ds").reset_index(drop=True)
@@ -408,7 +398,7 @@ def forecast_next_days_with_openmeteo(
         df_om2["y_model_mm"] = np.nan
         df_om2["y_ensemble_mm"] = df_om2["y_openmeteo_mm"]
 
-    # 4) ET0 FAO (agora com cache interno do fetch_et0_fao_daily)
+    # 4) ET0 FAO
     try:
         df_et0 = fetch_et0_fao_daily(
             lat=lat,
@@ -419,8 +409,7 @@ def forecast_next_days_with_openmeteo(
 
         if df_et0 is not None and not df_et0.empty:
             date_col = "ds" if "ds" in df_et0.columns else ("time" if "time" in df_et0.columns else None)
-            et0_col = "om_et0_fao_mm" if "om_et0_fao_mm" in df_et0.columns else "om_et0_fao_mm"
-
+            
             if date_col and "om_et0_fao_mm" in df_et0.columns:
                 tmp = df_et0[[date_col, "om_et0_fao_mm"]].copy()
                 tmp[date_col] = pd.to_datetime(tmp[date_col])
@@ -430,8 +419,7 @@ def forecast_next_days_with_openmeteo(
         else:
             df_om2["om_et0_fao_mm"] = np.nan
 
-    except Exception as e:
-        # _print(f"[future_forecast] AVISO: Erro ao buscar ET0 FAO: {e}.")
+    except Exception:
         df_om2["om_et0_fao_mm"] = np.nan
 
     # 5) Balanço hídrico “real” (bucket model)
@@ -444,27 +432,33 @@ def forecast_next_days_with_openmeteo(
             rain_col="y_ensemble_mm",
             et0_col="om_et0_fao_mm",
         )
-    except Exception as e:
-        # _print(f"[future_forecast] AVISO: Falha ao calcular balanço hídrico: {e}.")
+    except Exception:
         df_om2["water_balance_mm"] = np.nan
         df_om2["water_storage_mm"] = np.nan
         df_om2["deficit_mm"] = np.nan
         df_om2["excess_mm"] = np.nan
         df_om2["water_status"] = "INDISPONIVEL"
 
-    # 6) validação mínima de colunas
+    # 6) Validação mínima de colunas
     required_cols = [
-        "ds",
-        "y_ensemble_mm",
-        "om_temp2m_max",
-        "om_windspeed10_max",
-        "om_rh2m_max",
-        "om_et0_fao_mm",
+        "ds", "y_ensemble_mm", "om_temp2m_max",
+        "om_windspeed10_max", "om_rh2m_max", "om_et0_fao_mm",
     ]
     missing = [c for c in required_cols if c not in df_om2.columns]
     if missing:
         _print(f"[forecast] ❌ ERRO: Colunas necessárias ausentes: {missing}")
         return None
+
+    # =========================================================================
+    # 🔧 CALIBRAGEM LOCAL (BIAS CORRECTION)
+    # Aumenta a chuva para corrigir subestimação do satélite no verão
+    # =========================================================================
+    FATOR_CORRECAO_CHUVA = 1.4  # Aumenta 40%
+    
+    # Agora usando o nome correto: df_om2 (que é a tabela ativa aqui)
+    if "y_ensemble_mm" in df_om2.columns:
+        df_om2["y_ensemble_mm"] = df_om2["y_ensemble_mm"] * FATOR_CORRECAO_CHUVA
+        df_om2["y_ensemble_mm"] = df_om2["y_ensemble_mm"].round(1)
 
     return df_om2
 
