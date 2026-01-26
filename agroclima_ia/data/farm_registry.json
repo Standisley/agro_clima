@@ -1,0 +1,142 @@
+{
+  "rio_verde": {
+    "regiao": "Rio Verde (GO)",
+    "cultura": "soja",
+    "estagio_fenologico": "R1",
+    "sistema": "sequeiro",
+    "solo": "argiloso",
+    "lat": -17.7923,
+    "lon": -50.9191,
+    "series_id": "rio_verde"
+  },
+  "campo_grande": {
+    "regiao": "Campo Grande (MS)",
+    "cultura": "milho",
+    "estagio_fenologico": "V4",
+    "sistema": "sequeiro",
+    "solo": "argilo-arenoso",
+    "lat": -20.4697,
+    "lon": -54.6201,
+    "series_id": "campo_grande"
+  },
+  "goiania": {
+    "regiao": "Goiânia (GO)",
+    "cultura": "soja",
+    "estagio_fenologico": "R1",
+    "sistema": "sequeiro",
+    "solo": "argilo-arenoso",
+    "lat": -16.6869,
+    "lon": -49.2648,
+    "series_id": "goiania"
+  },
+  "sul_mg_cafe_frutificacao": {
+    "regiao": "Sul de Minas (MG)",
+    "cultura": "cafe",
+    "estagio_fenologico": "frutificacao",
+    "sistema": "sequeiro",
+    "solo": "argiloso",
+    "lat": -21.5514,
+    "lon": -45.4303,
+    "series_id": "sul_mg_cafe_frutificacao"
+  },
+  "sul_mg_cafe_pos_colheita": {
+    "regiao": "Sul de Minas (MG)",
+    "cultura": "cafe",
+    "estagio_fenologico": "pos_colheita",
+    "sistema": "sequeiro",
+    "solo": "argiloso",
+    "lat": -21.5514,
+    "lon": -45.4303,
+    "series_id": "sul_mg_cafe_pos_colheita"
+  },
+  "citros_sp_florescimento": {
+    "regiao": "Centro-leste de São Paulo",
+    "cultura": "laranja",
+    "estagio_fenologico": "florescimento",
+    "sistema": "sequeiro",
+    "solo": "argilo-arenoso",
+    "lat": -22.5645,
+    "lon": -47.4012,
+    "series_id": "citros_sp_florescimento"
+  },
+  "citros_sp_frutificacao": {
+    "regiao": "Centro-leste de São Paulo",
+    "cultura": "laranja",
+    "estagio_fenologico": "frutificacao",
+    "sistema": "sequeiro",
+    "solo": "argilo-arenoso",
+    "lat": -22.5645,
+    "lon": -47.4012,
+    "series_id": "citros_sp_frutificacao"
+  },
+  "trigo_rs_perfilhamento": {
+    "regiao": "Norte do Rio Grande do Sul",
+    "cultura": "trigo",
+    "estagio_fenologico": "perfilhamento",
+    "sistema": "sequeiro",
+    "solo": "argiloso",
+    "lat": -28.2620,
+    "lon": -52.4064,
+    "series_id": "trigo_rs_perfilhamento"
+  },
+  "trigo_rs_espigamento": {
+    "regiao": "Norte do Rio Grande do Sul",
+    "cultura": "trigo",
+    "estagio_fenologico": "espigamento",
+    "sistema": "sequeiro",
+    "solo": "argiloso",
+    "lat": -28.2620,
+    "lon": -52.4064,
+    "series_id": "trigo_rs_espigamento"
+  },
+  "arroz_irrigado_rs_enchimento": {
+    "regiao": "Campanha Gaúcha (RS)",
+    "cultura": "arroz",
+    "estagio_fenologico": "enchimento",
+    "sistema": "alagado",
+    "solo": "gleissolo",
+    "lat": -31.7654,
+    "lon": -52.3376,
+    "series_id": "arroz_irrigado_rs_enchimento"
+  },
+  "arroz_sequeiro_go": {
+    "regiao": "Goiás (GO)",
+    "cultura": "arroz",
+    "estagio_fenologico": "vegetativo",
+    "sistema": "sequeiro",
+    "solo": "argilo-arenoso",
+    "lat": -15.8270,
+    "lon": -49.8362,
+    "series_id": "arroz_sequeiro_go"
+  },
+  "banana_vale_ribeira_vegetativo": {
+    "regiao": "Vale do Ribeira (SP)",
+    "cultura": "banana",
+    "estagio_fenologico": "crescimento_vegetativo",
+    "sistema": "sequeiro",
+    "solo": "argilo-arenoso",
+    "lat": -24.4971,
+    "lon": -47.8449,
+    "series_id": "banana_vale_ribeira_vegetativo"
+  },
+  "banana_vale_ribeira_enchimento": {
+    "regiao": "Vale do Ribeira (SP)",
+    "cultura": "banana",
+    "estagio_fenologico": "enchimento_cachos",
+    "sistema": "sequeiro",
+    "solo": "argilo-arenoso",
+    "lat": -24.4971,
+    "lon": -47.8449,
+    "series_id": "banana_vale_ribeira_enchimento"
+  },
+  "default": {
+    "regiao": "Centro-Oeste (Brasil)",
+    "cultura": "soja",
+    "estagio_fenologico": "vegetativo",
+    "sistema": "sequeiro",
+    "solo": "argiloso",
+    "lat": -16.0,
+    "lon": -49.0,
+    "series_id": "default"
+  }
+}
